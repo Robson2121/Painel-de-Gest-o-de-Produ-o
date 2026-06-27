@@ -9,6 +9,7 @@ export interface PedidoCarrinho {
   pedido: string;
   data: string;
   timestamp: number;
+  status?: 'ATIVO' | 'FINALIZADO';
 }
 
 export interface OcorrenciaLider {

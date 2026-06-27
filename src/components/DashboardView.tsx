@@ -66,7 +66,7 @@ export default function DashboardView({ pedidos, ocorrencias, estatisticas }: Da
               Solicitações Ativas
             </span>
             <span className="text-3xl font-extrabold text-white mt-1 block">
-              {pedidos.length}
+              {pedidos.filter(p => p.status !== "FINALIZADO").length}
             </span>
           </div>
           <div className="p-3 rounded-xl bg-blue-500/10 text-blue-400">

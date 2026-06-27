@@ -4,24 +4,45 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { Landmark, Check, Clock, Radio } from "lucide-react";
+import { Landmark, Check, Clock, Radio, RefreshCw } from "lucide-react";
 import { PedidoCarrinho } from "../types";
 
 interface LogisticaViewProps {
   pedidos: PedidoCarrinho[];
   onFinalizarPedido: (id: number) => Promise<void>;
+  onSincronizar?: () => Promise<void>;
 }
 
-export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaViewProps) {
+export default function LogisticaView({ pedidos, onFinalizarPedido, onSincronizar }: LogisticaViewProps) {
   const [segundosDecorridos, setSegundosDecorridos] = useState<Record<number, number>>({});
+  const pedidosAtivos = pedidos.filter(p => p.status !== "FINALIZADO");
+
+  const obterTimestampSeguro = (p: PedidoCarrinho) => {
+    if (typeof p.timestamp === "number" && !isNaN(p.timestamp) && p.timestamp > 0) {
+      return p.timestamp;
+    }
+    if (typeof p.timestamp === "string") {
+      const parsed = parseInt(p.timestamp, 10);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+    if (typeof p.id === "number" && !isNaN(p.id) && p.id > 0) {
+      return p.id;
+    }
+    if (typeof p.id === "string") {
+      const parsed = parseInt(p.id, 10);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+    return Date.now();
+  };
 
   // Efeito para atualizar os cronômetros progressivos de cada cartão a cada segundo
   useEffect(() => {
     const interval = setInterval(() => {
       setSegundosDecorridos(prev => {
         const next: Record<number, number> = {};
-        pedidos.forEach(p => {
-          const ageInSeconds = Math.max(0, Math.floor((Date.now() - p.timestamp) / 1000));
+        pedidosAtivos.forEach(p => {
+          const ts = obterTimestampSeguro(p);
+          const ageInSeconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
           next[p.id] = ageInSeconds;
         });
         return next;
@@ -29,7 +50,7 @@ export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaV
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [pedidos]);
+  }, [pedidosAtivos]);
 
   const formatarTempo = (segundosTotais: number) => {
     if (segundosTotais < 60) {
@@ -52,24 +73,36 @@ export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaV
             <p className="text-xs text-slate-400">Canal de entrega e reposição de carrinhos e ganchos em tempo real.</p>
           </div>
         </div>
-        <span className="flex items-center gap-2 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-full border border-emerald-500/20 w-fit self-start">
-          <Radio className="h-3.5 w-3.5 text-emerald-400 animate-pulse" />
-          Servidor Conectado
-        </span>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          {onSincronizar && (
+            <button
+              onClick={onSincronizar}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 font-bold text-xs rounded-lg text-slate-300 hover:text-white border border-slate-600 transition-colors cursor-pointer mr-1"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Sincronizar
+            </button>
+          )}
+          <span className="flex items-center gap-2 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-full border border-emerald-500/20">
+            <Radio className="h-3.5 w-3.5 text-emerald-400 animate-pulse" />
+            Servidor Conectado
+          </span>
+        </div>
       </div>
 
-      {pedidos.length === 0 ? (
+      {pedidosAtivos.length === 0 ? (
         <div className="bg-slate-800 border border-dashed border-slate-700 rounded-2xl p-12 text-center text-slate-500">
           <Check className="h-12 w-12 text-slate-600 mx-auto mb-3" />
           <h4 className="text-white font-bold text-base mb-1">Tudo Sob Controle!</h4>
           <p className="text-xs text-slate-400 max-w-sm mx-auto">
-            Não há solicitações de carrinhos pendentes no momento. As linhas de produção estão abastecidas.
+             Não há solicitações de carrinhos pendentes no momento. As linhas de produção estão abastecidas.
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {pedidos.map(p => {
-            const segundos = segundosDecorridos[p.id] || Math.max(0, Math.floor((Date.now() - p.timestamp) / 1000));
+          {pedidosAtivos.map(p => {
+            const ts = obterTimestampSeguro(p);
+            const segundos = segundosDecorridos[p.id] !== undefined ? segundosDecorridos[p.id] : Math.max(0, Math.floor((Date.now() - ts) / 1000));
             const urgenciaAlta = segundos > 180;
             const urgenciaMedia = segundos > 60 && segundos <= 180;
 

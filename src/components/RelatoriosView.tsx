@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { Table, Trash2, FileSpreadsheet, RefreshCw, UploadCloud, Clock, CheckSquare } from "lucide-react";
 import { PedidoCarrinho, OcorrenciaLider, Estatisticas } from "../types";
 
@@ -27,8 +27,11 @@ export default function RelatoriosView({
   onImportarCSV
 }: RelatoriosViewProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [ocultarPendentes, setOcultarPendentes] = useState(false);
 
   const chamadosResolvidos = ocorrencias.filter(o => o.status === "RESOLVIDA");
+  const pedidosEntregues = pedidos.filter(p => p.status === "FINALIZADO");
+  const exibidosPedidos = ocultarPendentes ? pedidos.filter(p => p.status === "FINALIZADO") : pedidos;
 
   // Função para exportar os dados em formato CSV (compatível com Excel)
   const handleExportarExcel = () => {
@@ -43,13 +46,17 @@ export default function RelatoriosView({
 
     maquinas.forEach(m => {
       const qtd = estatisticas.porMaquina[m] || 0;
-      const ultimoStatus = pedidos.find(p => p.maquina === m)?.pedido || "Normal";
+      const rawStatus = exibidosPedidos.find(p => p.maquina === m)?.pedido || "Normal";
+      // Sanitiza textos para evitar quebra de colunas ou linhas no arquivo CSV/Excel
+      const ultimoStatus = rawStatus.replace(/[\n\r;"]/g, " ").trim();
       csvContent += `${m};${qtd};"${ultimoStatus}"\n`;
     });
 
     csvContent += "\n⏱️ HISTORICO DO LIDER\nMaquina;Ocorrencia Resolvida;Tempo Resposta\n";
     chamadosResolvidos.forEach(h => {
-      csvContent += `${h.maquina};"${h.motivo}";${h.tempoResposta || "N/A"}\n`;
+      const motivoSanitizado = h.motivo.replace(/[\n\r;"]/g, " ").trim();
+      const tempoSanitizado = (h.tempoResposta || "N/A").replace(/[\n\r;"]/g, " ").trim();
+      csvContent += `${h.maquina};"${motivoSanitizado}";${tempoSanitizado}\n`;
     });
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -68,7 +75,7 @@ export default function RelatoriosView({
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       const text = e.target?.result as string;
       const linhas = text.split("\n");
       
@@ -90,7 +97,9 @@ export default function RelatoriosView({
           if (colunas.length >= 2) {
             const m = colunas[0].replace(/"/g, "").trim();
             const q = parseInt(colunas[1]) || 0;
-            porMaquina[m] = q;
+            if (m && m !== "Maquina" && m !== "Máquina") {
+              porMaquina[m] = q;
+            }
           }
         } else {
           if (colunas.length >= 3 && !colunas[0].includes("Maquina") && !colunas[0].includes("Máquina")) {
@@ -106,8 +115,8 @@ export default function RelatoriosView({
         }
       }
 
-      onImportarCSV({ porMaquina, chamadosLider });
-      alert("✅ Dados do CSV carregados e aplicados ao painel com sucesso!");
+      await onImportarCSV({ porMaquina, chamadosLider });
+      setOcultarPendentes(false);
     };
     reader.readAsText(file, "UTF-8");
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -127,7 +136,10 @@ export default function RelatoriosView({
 
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={onSincronizar}
+            onClick={async () => {
+              await onSincronizar();
+              setOcultarPendentes(false);
+            }}
             className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 font-bold text-xs rounded-xl text-slate-300 hover:text-white border border-slate-600 transition-colors cursor-pointer"
           >
             <RefreshCw className="h-4 w-4" />
@@ -158,7 +170,10 @@ export default function RelatoriosView({
           </button>
 
           <button
-            onClick={onZerarRelatorio}
+            onClick={async () => {
+              await onZerarRelatorio();
+              setOcultarPendentes(true);
+            }}
             className="flex items-center justify-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 font-bold text-xs rounded-xl text-white shadow-md transition-colors cursor-pointer"
           >
             <Trash2 className="h-4 w-4" />
@@ -181,18 +196,19 @@ export default function RelatoriosView({
                 <tr className="text-slate-400 text-xs font-semibold uppercase text-left">
                   <th className="py-3 px-4 bg-slate-900/60 rounded-l-xl">Máquina</th>
                   <th className="py-3 px-4 bg-slate-900/60">Carrinhos Solicitados</th>
+                  <th className="py-3 px-4 bg-slate-900/60">Status</th>
                   <th className="py-3 px-4 bg-slate-900/60 rounded-r-xl text-right">Qtd</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/50">
-                {pedidos.length === 0 ? (
+                {exibidosPedidos.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="py-6 text-center text-slate-500 text-xs">
-                      Nenhum carrinho ativo no momento.
+                    <td colSpan={4} className="py-6 text-center text-slate-500 text-xs">
+                      Nenhum carrinho registrado no momento.
                     </td>
                   </tr>
                 ) : (
-                  pedidos.map(p => {
+                  exibidosPedidos.map(p => {
                     const interacoes = estatisticas.porMaquina[p.maquina] || 1;
                     return (
                       <tr key={p.id} className="text-slate-300 hover:bg-slate-900/20 transition-colors">
@@ -201,6 +217,17 @@ export default function RelatoriosView({
                           <span className="inline-block bg-slate-900 text-slate-300 text-xs px-2.5 py-1 rounded-lg border border-slate-700 font-semibold">
                             {p.pedido}
                           </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          {p.status === "FINALIZADO" ? (
+                            <span className="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold px-2 py-0.5 rounded-lg uppercase">
+                              Entregue
+                            </span>
+                          ) : (
+                            <span className="inline-block bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-bold px-2 py-0.5 rounded-lg uppercase animate-pulse">
+                              Pendente
+                            </span>
+                          )}
                         </td>
                         <td className="py-3 px-4 text-right font-bold text-blue-400">{interacoes}</td>
                       </tr>

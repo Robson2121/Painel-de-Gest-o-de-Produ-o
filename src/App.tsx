@@ -18,9 +18,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { PedidoCarrinho, OcorrenciaLider, Usuario, Estatisticas } from "./types";
-import { auth, db, handleFirestoreError, OperationType, hashPassword } from "./firebase";
-import { signInAnonymously } from "firebase/auth";
-import { collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch, getDocs, query, limit } from "firebase/firestore";
+import { hashPassword } from "./firebase";
 
 // Importação das Visões Modulares
 import LoginView from "./components/LoginView";
@@ -32,14 +30,21 @@ import RelatoriosView from "./components/RelatoriosView";
 import AdminView from "./components/AdminView";
 
 export default function App() {
-  const [usuarioLogado, setUsuarioLogado] = useState<Usuario | null>(null);
+  const [usuarioLogado, setUsuarioLogado] = useState<Usuario | null>(() => {
+    const saved = localStorage.getItem("usuarioLogado");
+    try {
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [temaEscuro, setTemaEscuro] = useState(true);
 
   // Estados compartilhados de dados vindos do Express
   const [pedidos, setPedidos] = useState<PedidoCarrinho[]>([]);
   const [ocorrencias, setOcorrencias] = useState<OcorrenciaLider[]>([]);
-  const [usuarios, setUsuarios] = useState<Usuario[]>([]);
-  const [ipsBloqueados, setIpsBloqueados] = useState<{ ip: string; tentativas: number }[]>([]);
+  const [usuarios, setUsuarios] = useState<Usuario[]>(INITIAL_USUARIOS);
+  const [ipsBloqueados, setIpsBloqueados] = useState<{ ip: string; tentatives?: number; tentativas: number }[]>([]);
   const [estatisticas, setEstatisticas] = useState<Estatisticas>({
     total: 0,
     porMaquina: {},
@@ -48,7 +53,10 @@ export default function App() {
   });
 
   // Aba ativa atual
-  const [abaAtiva, setAbaAtiva] = useState<string>("dashboard");
+  const [abaAtiva, setAbaAtiva] = useState<string>(() => {
+    return localStorage.getItem("abaAtiva") || "dashboard";
+  });
+
 
   // Controle de notificações de emergência no navegador e som unificado
   const [lastOcorrenciaIds, setLastOcorrenciaIds] = useState<number[]>([]);
@@ -157,112 +165,84 @@ export default function App() {
     setLastOcorrenciaIds(ocorrencias.map(o => o.id));
   }, [ocorrencias]);
 
-  // Autenticação anônima opcional no Firebase na inicialização
+  // Sincroniza usuário logado com localStorage
   useEffect(() => {
-    const inicializarFirebase = async () => {
+    if (usuarioLogado) {
+      localStorage.setItem("usuarioLogado", JSON.stringify(usuarioLogado));
+    } else {
+      localStorage.removeItem("usuarioLogado");
+      localStorage.removeItem("abaAtiva");
+    }
+  }, [usuarioLogado]);
+
+  // Sincroniza aba ativa com localStorage
+  useEffect(() => {
+    if (usuarioLogado) {
+      localStorage.setItem("abaAtiva", abaAtiva);
+    }
+  }, [abaAtiva, usuarioLogado]);
+
+  // Função para carregar todos os dados do Express em lote de forma resiliente e segura
+  const carregarDados = async () => {
+    let success = true;
+    const fetchSafe = async (url: string) => {
       try {
-        await signInAnonymously(auth);
-        console.log("Autenticado anonimamente no Firebase!");
-      } catch (err: any) {
-        console.log("Nota: Autenticação anônima indisponível no ambiente de testes. Operando com regras de acesso direto públicas seguras.", err.message);
-      }
-    };
-    inicializarFirebase();
-  }, []);
-
-  useEffect(() => {
-    // 1. Ouvinte para Pedidos
-    const unsubPedidos = onSnapshot(
-      collection(db, "pedidos"),
-      (snapshot) => {
-        const list: PedidoCarrinho[] = [];
-        snapshot.forEach((d) => {
-          list.push(d.data() as PedidoCarrinho);
-        });
-        list.sort((a, b) => a.timestamp - b.timestamp);
-        setPedidos(list);
-      },
-      (err) => {
-        handleFirestoreError(err, OperationType.LIST, "pedidos");
-      }
-    );
-
-    // 2. Ouvinte para Ocorrências
-    const unsubOcorrencias = onSnapshot(
-      collection(db, "ocorrencias"),
-      (snapshot) => {
-        const list: OcorrenciaLider[] = [];
-        snapshot.forEach((d) => {
-          list.push(d.data() as OcorrenciaLider);
-        });
-        list.sort((a, b) => b.timestamp - a.timestamp);
-        setOcorrencias(list);
-      },
-      (err) => {
-        handleFirestoreError(err, OperationType.LIST, "ocorrencias");
-      }
-    );
-
-    // 3. Ouvinte para Usuários com Seed Inicial automático se vazio
-    const unsubUsuarios = onSnapshot(
-      collection(db, "usuarios"),
-      async (snapshot) => {
-        if (snapshot.empty) {
-          const INITIAL_USUARIOS: Usuario[] = [
-            { id: "1", login: "admin", cargo: "ADMIN", senha: await hashPassword("admin") },
-            { id: "2", login: "lider1", cargo: "LIDER", senha: await hashPassword("lider1") },
-            { id: "3", login: "op1", cargo: "OPERADOR", senha: await hashPassword("op1") },
-            { id: "4", login: "log1", cargo: "LOGISTICA", senha: await hashPassword("log1") },
-            { id: "5", login: "bi1", cargo: "RELATORIO", senha: await hashPassword("bi1") },
-          ];
-          for (const u of INITIAL_USUARIOS) {
-            try {
-              await setDoc(doc(db, "usuarios", u.id), u);
-            } catch (err) {
-              console.error("Erro ao semear usuário inicial:", err);
-            }
+        const separator = url.includes("?") ? "&" : "?";
+        const res = await fetch(`${url}${separator}_t=${Date.now()}`, {
+          headers: {
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
           }
-          setUsuarios(INITIAL_USUARIOS);
-        } else {
-          const list: Usuario[] = [];
-          snapshot.forEach((d) => {
-            list.push(d.data() as Usuario);
-          });
-          setUsuarios(list);
-        }
-      },
-      (err) => {
-        handleFirestoreError(err, OperationType.LIST, "usuarios");
-      }
-    );
-
-    // 4. Ouvinte para IPs Bloqueados
-    const unsubIps = onSnapshot(
-      collection(db, "ipsBloqueados"),
-      (snapshot) => {
-        const list: { ip: string; tentativas: number }[] = [];
-        snapshot.forEach((d) => {
-          list.push(d.data() as { ip: string; tentativas: number });
         });
-        setIpsBloqueados(list);
-      },
-      (err) => {
-        handleFirestoreError(err, OperationType.LIST, "ipsBloqueados");
+        if (!res.ok) {
+          success = false;
+          return null;
+        }
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          return await res.json();
+        }
+        success = false;
+        return null;
+      } catch (err) {
+        // Ignora silenciosamente erros de conexão ou de rede temporários
+        success = false;
+        return null;
       }
-    );
-
-    return () => {
-      unsubPedidos();
-      unsubOcorrencias();
-      unsubUsuarios();
-      unsubIps();
     };
+
+    try {
+      const [resPedidos, resOcorrencias, resUsuarios, resIps] = await Promise.all([
+        fetchSafe("/api/pedidos"),
+        fetchSafe("/api/ocorrencias"),
+        fetchSafe("/api/usuarios"),
+        fetchSafe("/api/ips-bloqueados")
+      ]);
+
+      if (resPedidos !== null) setPedidos(resPedidos);
+      if (resOcorrencias !== null) setOcorrencias(resOcorrencias);
+      if (resUsuarios !== null) setUsuarios(resUsuarios);
+      if (resIps !== null) setIpsBloqueados(resIps);
+      return success;
+    } catch (err) {
+      // Ignora quaisquer outros erros inesperados no lote
+      return false;
+    }
+  };
+
+  // Efeito de polling a cada 2 segundos
+  useEffect(() => {
+    carregarDados();
+    const interval = setInterval(carregarDados, 2000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Recalcula Estatísticas Dinamicamente no Cliente baseado nas coleções do Firestore
+  // Recalcula Estatísticas Dinamicamente no Cliente baseado nas coleções carregadas
   useEffect(() => {
     const porMaquina: Record<string, number> = {};
-    pedidos.forEach(p => {
+    const pedidosFinalizados = pedidos.filter(p => p.status === "FINALIZADO");
+    pedidosFinalizados.forEach(p => {
       porMaquina[p.maquina] = (porMaquina[p.maquina] || 0) + 1;
     });
 
@@ -272,7 +252,7 @@ export default function App() {
     });
 
     setEstatisticas({
-      total: pedidos.length,
+      total: pedidosFinalizados.length,
       porMaquina,
       totalProblemas: ocorrencias.length,
       problemasPorMaquina
@@ -281,159 +261,140 @@ export default function App() {
 
   // Handlers para as Visões
 
-  // 1. Cadastrar pedido de carrinho no Firestore
+  // 1. Cadastrar pedido de carrinho no MongoDB
   const handleAdicionarPedido = async (maquina: string, pedido: string) => {
-    const id = Date.now();
-    const novo: PedidoCarrinho = {
-      id,
-      maquina,
-      pedido,
-      data: new Date().toLocaleString("pt-BR"),
-      timestamp: Date.now()
-    };
     try {
-      await setDoc(doc(db, "pedidos", String(id)), novo);
+      const res = await fetch("/api/pedidos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maquina, pedido })
+      });
+      if (!res.ok) throw new Error("Erro ao adicionar pedido");
+      carregarDados();
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `pedidos/${id}`);
+      console.error("Erro ao adicionar pedido:", err);
     }
   };
 
-  // 2. Finalizar pedido de carrinho no Firestore
+  // 2. Finalizar pedido de carrinho no MongoDB
   const handleFinalizarPedido = async (id: number) => {
     try {
-      await deleteDoc(doc(db, "pedidos", String(id)));
+      const res = await fetch(`/api/pedidos/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Erro ao finalizar pedido");
+      carregarDados();
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `pedidos/${id}`);
+      console.error("Erro ao finalizar pedido:", err);
     }
   };
 
-  // 3. Cadastrar ocorrência de máquina parada no Firestore
+  // 3. Cadastrar ocorrência de máquina parada no MongoDB
   const handleAdicionarOcorrencia = async (maquina: string, motivo: string) => {
-    const id = Date.now();
-    const nova: OcorrenciaLider = {
-      id,
-      maquina,
-      motivo,
-      data: new Date().toLocaleTimeString("pt-BR"),
-      timestamp: Date.now(),
-      status: "ATIVA"
-    };
     try {
-      await setDoc(doc(db, "ocorrencias", String(id)), nova);
+      const res = await fetch("/api/ocorrencias", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maquina, motivo })
+      });
+      if (!res.ok) throw new Error("Erro ao adicionar ocorrência");
+      carregarDados();
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `ocorrencias/${id}`);
+      console.error("Erro ao adicionar ocorrência:", err);
     }
   };
 
-  // 4. Resolver ocorrência com tempo de resposta no Firestore
+  // 4. Resolver ocorrência com tempo de resposta no MongoDB
   const handleResolverOcorrencia = async (id: number, tempoResposta: string) => {
     try {
-      await setDoc(doc(db, "ocorrencias", String(id)), {
-        status: "RESOLVIDA",
-        tempoResposta
-      }, { merge: true });
+      const res = await fetch(`/api/ocorrencias/${id}/resolver`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tempoResposta })
+      });
+      if (!res.ok) throw new Error("Erro ao resolver ocorrência");
+      carregarDados();
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `ocorrencias/${id}`);
+      console.error("Erro ao resolver ocorrência:", err);
     }
   };
 
-  // 5. Cadastrar novo usuário (Admin) no Firestore com senha criptografada
+  // 5. Cadastrar novo usuário (Admin) no MongoDB com senha criptografada
   const handleAdicionarUsuario = async (login: string, cargo: Usuario["cargo"], senha?: string) => {
     if (usuarios.some(u => u.login.toLowerCase() === login.toLowerCase())) {
       throw new Error("Usuário com este login já existe");
     }
-    const id = String(Date.now());
     
     // Criptografa/hash a senha usando SHA-256. Se não enviada, assume o login como senha inicial.
     const senhaFinal = senha?.trim() || login;
     const senhaCriptografada = await hashPassword(senhaFinal);
 
-    const novo: Usuario = { 
-      id, 
-      login, 
-      cargo, 
-      senha: senhaCriptografada 
-    };
-    
     try {
-      await setDoc(doc(db, "usuarios", id), novo);
+      const res = await fetch("/api/usuarios", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ login, cargo, senha: senhaCriptografada })
+      });
+      if (!res.ok) throw new Error("Erro ao adicionar usuário");
+      carregarDados();
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `usuarios/${id}`);
+      console.error("Erro ao adicionar usuário:", err);
     }
   };
 
-  // 6. Remover usuário (Admin) do Firestore
+  // 6. Remover usuário (Admin) do MongoDB
   const handleExcluirUsuario = async (id: string) => {
     try {
-      await deleteDoc(doc(db, "usuarios", id));
+      const res = await fetch(`/api/usuarios/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Erro ao excluir usuário");
+      carregarDados();
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `usuarios/${id}`);
+      console.error("Erro ao excluir usuário:", err);
     }
   };
 
-  // 7. Desbloquear IP bloqueado por força bruta no Firestore
+  // 7. Desbloquear IP bloqueado por força bruta no MongoDB
   const handleDesbloquearIp = async (ip: string) => {
     try {
-      await deleteDoc(doc(db, "ipsBloqueados", ip));
+      const res = await fetch(`/api/ips-bloqueados/${ip}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Erro ao desbloquear IP");
+      carregarDados();
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `ipsBloqueados/${ip}`);
+      console.error("Erro ao desbloquear IP:", err);
     }
   };
 
-  // 8. Zerar apenas o fluxo de carrinhos ativos no Firestore
+  // 8. Zerar apenas o fluxo de carrinhos ativos no MongoDB
   const handleZerarRelatorio = async () => {
     try {
-      const pedidosSnapshot = await getDocs(collection(db, "pedidos"));
-      const batch = writeBatch(db);
-      pedidosSnapshot.forEach(docSnap => batch.delete(docSnap.ref));
-      await batch.commit();
-      alert("✅ Fluxo de carrinhos ativos zerado com sucesso!");
+      const res = await fetch("/api/reset", { method: "POST" });
+      if (!res.ok) throw new Error("Erro ao zerar carrinhos");
+      await carregarDados();
+      alert("✅ Fluxo de carrinhos entregues (finalizados) zerado com sucesso! Os pedidos pendentes na Logística foram mantidos ativos.");
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, "reset_collections");
+      console.error("Erro ao resetar relatórios:", err);
     }
   };
 
-  // 9. Limpar histórico de chamados resolvidos do Líder no Firestore
+  // 9. Limpar histórico de chamados resolvidos do Líder no MongoDB
   const handleLimparHistoricoLider = async () => {
     try {
-      const ocorrenciasSnapshot = await getDocs(collection(db, "ocorrencias"));
-      const batch = writeBatch(db);
-      let count = 0;
-      ocorrenciasSnapshot.forEach(docSnap => {
-        if (docSnap.data().status === "RESOLVIDA") {
-          batch.delete(docSnap.ref);
-          count++;
-        }
-      });
-      if (count > 0) {
-        await batch.commit();
-      }
+      const res = await fetch("/api/ocorrencias/limpar-resolvidas", { method: "POST" });
+      if (!res.ok) throw new Error("Erro ao limpar histórico");
+      await carregarDados();
       alert("✅ Histórico de chamados resolvidos limpo com sucesso!");
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, "clear_resolved_ocorrencias");
+      console.error("Erro ao limpar histórico do líder:", err);
     }
   };
 
   // 10. Forçar sincronização imediata com os pedidos no painel da logística e ocorrências do Líder
   const handleSincronizar = async () => {
     try {
-      const pedidosSnapshot = await getDocs(collection(db, "pedidos"));
-      const listPedidos: PedidoCarrinho[] = [];
-      pedidosSnapshot.forEach((d) => {
-        listPedidos.push(d.data() as PedidoCarrinho);
-      });
-      listPedidos.sort((a, b) => a.timestamp - b.timestamp);
-      setPedidos(listPedidos);
-
-      const ocorrenciasSnapshot = await getDocs(collection(db, "ocorrencias"));
-      const listOcorrencias: OcorrenciaLider[] = [];
-      ocorrenciasSnapshot.forEach((d) => {
-        listOcorrencias.push(d.data() as OcorrenciaLider);
-      });
-      listOcorrencias.sort((a, b) => b.timestamp - a.timestamp);
-      setOcorrencias(listOcorrencias);
-
-      alert("✅ Sincronização realizada! Dados atualizados com os pedidos da Logística.");
+      const ok = await carregarDados();
+      if (ok) {
+        alert("✅ Sincronização realizada! Dados atualizados com os pedidos da Logística.");
+      } else {
+        alert("⚠️ Alguns dados podem não ter sido sincronizados. Verifique a conexão com o servidor.");
+      }
     } catch (err) {
       console.error("Erro ao sincronizar:", err);
       alert("❌ Erro ao sincronizar com os dados da Logística.");
@@ -442,22 +403,30 @@ export default function App() {
 
   // 11. Importar dados de arquivo CSV externo
   const handleImportarCSV = async (dadosImportados: { porMaquina: Record<string, number>; chamadosLider: any[] }) => {
-    setEstatisticas(prev => ({
-      ...prev,
-      porMaquina: dadosImportados.porMaquina
-    }));
-    
-    // Envia novos chamados do CSV para o Firestore
-    for (const ocorrencia of dadosImportados.chamadosLider) {
-      const id = ocorrencia.id || Date.now();
-      try {
-        await setDoc(doc(db, "ocorrencias", String(id)), {
-          ...ocorrencia,
-          id
+    try {
+      // 1. Envia as estatísticas/pedidos por máquina em lote para persistência durável no banco
+      const resPedidos = await fetch("/api/pedidos/importar-lote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ porMaquina: dadosImportados.porMaquina })
+      });
+      if (!resPedidos.ok) throw new Error("Erro ao importar lote de pedidos");
+
+      // 2. Envia os chamados resolvidos do líder em lote para persistência durável no banco
+      if (dadosImportados.chamadosLider.length > 0) {
+        const resOcorrencias = await fetch("/api/ocorrencias/importar-lote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chamadosLider: dadosImportados.chamadosLider })
         });
-      } catch (err) {
-        console.error("Erro ao importar ocorrência do CSV:", err);
+        if (!resOcorrencias.ok) throw new Error("Erro ao importar lote de ocorrências");
       }
+
+      await carregarDados();
+      alert("✅ Dados do CSV carregados e sincronizados com o servidor com sucesso!");
+    } catch (err) {
+      console.error("Erro ao importar CSV:", err);
+      alert("❌ Falha ao carregar e persistir dados do CSV no servidor.");
     }
   };
 
@@ -687,6 +656,7 @@ export default function App() {
               <LogisticaView
                 pedidos={pedidos}
                 onFinalizarPedido={handleFinalizarPedido}
+                onSincronizar={handleSincronizar}
               />
             )}
             {abaAtiva === "lider" && (

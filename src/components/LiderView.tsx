@@ -13,8 +13,32 @@ interface LiderViewProps {
 }
 
 export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderViewProps) {
-  const [segundosDecorridos, setSegundosDecorridos] = useState<Record<number, number>>({});
+  const [currentTime, setCurrentTime] = useState(Date.now());
+  const [serverOffset, setServerOffset] = useState(0);
   const [alarmeAtivo, setAlarmeAtivo] = useState(false);
+
+  useEffect(() => {
+    // Sincroniza o relógio do cliente com o do servidor para precisão absoluta do cronômetro
+    const sincronizarRelogio = async () => {
+      try {
+        const start = Date.now();
+        const res = await fetch("/api/ocorrencias", { method: "HEAD" });
+        const end = Date.now();
+        const serverDateHeader = res.headers.get("Date");
+        if (serverDateHeader) {
+          const serverTime = new Date(serverDateHeader).getTime();
+          const latency = (end - start) / 2;
+          const adjustedServerTime = serverTime + latency;
+          const offset = Date.now() - adjustedServerTime;
+          setServerOffset(offset);
+          console.log("[LiderView] Desvio de relógio detectado e sincronizado:", offset, "ms");
+        }
+      } catch (err) {
+        console.warn("Falha ao sincronizar relógio com o servidor:", err);
+      }
+    };
+    sincronizarRelogio();
+  }, []);
   const [sireneHabilitada, setSireneAtiva] = useState(true); // Ativo por padrão para maior segurança
   const [silenciado, setSilenciado] = useState(false);
   const [precisaInteracao, setPrecisaInteracao] = useState(false);
@@ -150,30 +174,55 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
     }
   };
 
+  const obterTimestampSeguro = (o: OcorrenciaLider) => {
+    if (o.timestamp) {
+      if (typeof o.timestamp === "number" && !isNaN(o.timestamp) && o.timestamp > 0) {
+        return o.timestamp;
+      }
+      if (typeof o.timestamp === "string") {
+        if (/^\d+$/.test(o.timestamp)) {
+          const parsed = parseInt(o.timestamp, 10);
+          if (!isNaN(parsed) && parsed > 0) return parsed;
+        }
+        const parsedDate = Date.parse(o.timestamp);
+        if (!isNaN(parsedDate) && parsedDate > 0) return parsedDate;
+      }
+    }
+    if (o.id) {
+      if (typeof o.id === "number" && !isNaN(o.id) && o.id > 0) {
+        return o.id;
+      }
+      if (typeof o.id === "string") {
+        if (/^\d+$/.test(o.id)) {
+          const parsed = parseInt(o.id, 10);
+          if (!isNaN(parsed) && parsed > 0) return parsed;
+        }
+        const parsedDate = Date.parse(o.id);
+        if (!isNaN(parsedDate) && parsedDate > 0) return parsedDate;
+      }
+    }
+    return Date.now() - serverOffset;
+  };
+
   // Efeito do cronômetro progressivo das paradas ativas
   useEffect(() => {
     const interval = setInterval(() => {
-      setSegundosDecorridos(prev => {
-        const next: Record<number, number> = {};
-        chamadosAtivos.forEach(o => {
-          const ageInSeconds = Math.max(0, Math.floor((Date.now() - o.timestamp) / 1000));
-          next[o.id] = ageInSeconds;
-        });
-        return next;
-      });
+      setCurrentTime(Date.now());
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [ocorrencias]);
+  }, []);
 
   const formatarTempo = (segundos: number) => {
+    if (isNaN(segundos)) return "00m 00s";
     const m = Math.floor(segundos / 60).toString().padStart(2, "0");
     const s = (segundos % 60).toString().padStart(2, "0");
     return `${m}m ${s}s`;
   };
 
   const handleFinalizar = async (o: OcorrenciaLider) => {
-    const totalSegundos = segundosDecorridos[o.id] || Math.max(0, Math.floor((Date.now() - o.timestamp) / 1000));
+    const ts = obterTimestampSeguro(o);
+    const totalSegundos = Math.max(0, Math.floor((Date.now() - serverOffset - ts) / 1000));
     const tempoGasto = formatarTempo(totalSegundos);
     await onResolverOcorrencia(o.id, tempoGasto);
   };
@@ -315,7 +364,8 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {chamadosAtivos.map(o => {
-            const segundos = segundosDecorridos[o.id] || Math.max(0, Math.floor((Date.now() - o.timestamp) / 1000));
+            const ts = obterTimestampSeguro(o);
+            const segundos = Math.max(0, Math.floor((currentTime - serverOffset - ts) / 1000));
             const estilo = obterEstiloGravidade(o.motivo);
 
             return (
