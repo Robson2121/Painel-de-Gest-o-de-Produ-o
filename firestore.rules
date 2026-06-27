@@ -1,0 +1,92 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable global helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Schema Validations
+    function isValidPedido(data) {
+      return data.keys().hasAll(['id', 'maquina', 'pedido', 'data', 'timestamp'])
+        && data.keys().size() == 5
+        && data.id is number
+        && data.maquina is string && data.maquina.size() <= 100
+        && data.pedido is string && data.pedido.size() <= 1000
+        && data.data is string && data.data.size() <= 100
+        && data.timestamp is number;
+    }
+
+    function isValidOcorrencia(data) {
+      return data.keys().hasAll(['id', 'maquina', 'motivo', 'data', 'timestamp', 'status'])
+        && (data.keys().size() == 6 || (data.keys().size() == 7 && data.keys().hasAll(['tempoResposta'])))
+        && data.id is number
+        && data.maquina is string && data.maquina.size() <= 100
+        && data.motivo is string && data.motivo.size() <= 1000
+        && data.data is string && data.data.size() <= 100
+        && data.timestamp is number
+        && data.status in ['ATIVA', 'RESOLVIDA']
+        && (!data.keys().hasAll(['tempoResposta']) || data.tempoResposta is string);
+    }
+
+    // Admin/User creation validations
+    function isValidUsuario(data) {
+      return data.keys().hasAll(['id', 'login', 'cargo'])
+        && (data.keys().size() == 3 || (data.keys().size() == 4 && data.keys().hasAll(['senha'])))
+        && data.id is string && data.id.size() <= 100
+        && data.login is string && data.login.size() <= 100
+        && data.cargo in ['OPERADOR', 'LIDER', 'LOGISTICA', 'RELATORIO', 'ADMIN']
+        && (!data.keys().hasAll(['senha']) || (data.senha is string && data.senha.size() <= 200));
+    }
+
+    function isValidIpBloqueado(data) {
+      return data.keys().hasAll(['ip', 'tentativas'])
+        && data.keys().size() == 2
+        && data.ip is string && data.ip.size() <= 100
+        && data.tentativas is number;
+    }
+
+    // Rules for each collection
+    match /pedidos/{pedidoId} {
+      allow read: if true;
+      allow create: if isValidPedido(incoming());
+      allow update: if isValidPedido(incoming());
+      allow delete: if true;
+    }
+
+    match /ocorrencias/{ocorrenciaId} {
+      allow read: if true;
+      allow create: if isValidOcorrencia(incoming());
+      allow update: if isValidOcorrencia(incoming());
+      allow delete: if true;
+    }
+
+    match /usuarios/{usuarioId} {
+      allow read: if true;
+      allow create: if isValidUsuario(incoming());
+      allow update: if isValidUsuario(incoming());
+      allow delete: if true;
+    }
+
+    match /ipsBloqueados/{ipId} {
+      allow read: if true;
+      allow create: if isValidIpBloqueado(incoming());
+      allow update: if isValidIpBloqueado(incoming());
+      allow delete: if true;
+    }
+  }
+}

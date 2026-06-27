@@ -1,0 +1,71 @@
+{
+  "entities": {
+    "Pedido": {
+      "title": "Pedido",
+      "description": "Pedido de carrinho de transporte na fábrica",
+      "type": "object",
+      "properties": {
+        "id": { "type": "integer" },
+        "maquina": { "type": "string" },
+        "pedido": { "type": "string" },
+        "data": { "type": "string" },
+        "timestamp": { "type": "integer" }
+      },
+      "required": ["id", "maquina", "pedido", "data", "timestamp"]
+    },
+    "Ocorrencia": {
+      "title": "Ocorrencia",
+      "description": "Registro de parada de máquina ou emergência enviada ao líder",
+      "type": "object",
+      "properties": {
+        "id": { "type": "integer" },
+        "maquina": { "type": "string" },
+        "motivo": { "type": "string" },
+        "data": { "type": "string" },
+        "timestamp": { "type": "integer" },
+        "status": { "type": "string", "enum": ["ATIVA", "RESOLVIDA"] },
+        "tempoResposta": { "type": "string" }
+      },
+      "required": ["id", "maquina", "motivo", "data", "timestamp", "status"]
+    },
+    "Usuario": {
+      "title": "Usuario",
+      "description": "Usuários do sistema de gestão com seus respectivos cargos",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "login": { "type": "string" },
+        "cargo": { "type": "string", "enum": ["OPERADOR", "LIDER", "LOGISTICA", "RELATORIO", "ADMIN"] }
+      },
+      "required": ["id", "login", "cargo"]
+    },
+    "IpBloqueado": {
+      "title": "IpBloqueado",
+      "description": "IPs bloqueados por tentativas excessivas de login",
+      "type": "object",
+      "properties": {
+        "ip": { "type": "string" },
+        "tentativas": { "type": "integer" }
+      },
+      "required": ["ip", "tentativas"]
+    }
+  },
+  "firestore": {
+    "/pedidos/{pedidoId}": {
+      "schema": "Pedido",
+      "description": "Coleção de pedidos de carrinhos"
+    },
+    "/ocorrencias/{ocorrenciaId}": {
+      "schema": "Ocorrencia",
+      "description": "Coleção de ocorrências de parada de máquina"
+    },
+    "/usuarios/{usuarioId}": {
+      "schema": "Usuario",
+      "description": "Coleção de usuários registrados"
+    },
+    "/ipsBloqueados/{ipId}": {
+      "schema": "IpBloqueado",
+      "description": "Coleção de IPs bloqueados"
+    }
+  }
+}
