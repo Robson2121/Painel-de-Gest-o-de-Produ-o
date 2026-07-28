@@ -209,8 +209,8 @@ export default function DashboardView({ pedidos, ocorrencias, estatisticas, turn
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Gráfico de Produtividade do Turno */}
-        <div className="lg:col-span-2 bg-slate-800 border border-slate-700 p-6 rounded-2xl space-y-4">
-          <div className="flex items-center justify-between">
+        <div className="lg:col-span-2 bg-slate-800 border border-slate-700 p-6 rounded-2xl space-y-4 overflow-hidden">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
               <BarChart2 className="h-5 w-5 text-blue-400" />
               Volume de Interações por Moldadora
@@ -220,37 +220,39 @@ export default function DashboardView({ pedidos, ocorrencias, estatisticas, turn
             </span>
           </div>
 
-          <div className="h-[220px] flex items-end justify-between gap-3 pt-6 border-b border-slate-700">
-            {maquinasLista.map(m => {
-              const qtd = porMaquinaFiltrado[m] || 0;
-              const maxQtd = Math.max(...Object.values(porMaquinaFiltrado), 1);
-              const heightPercent = (qtd / maxQtd) * 160;
-              const estaParada = maquinasParadas.includes(m);
-              const barHeight = estaParada ? Math.max(heightPercent, 28) : heightPercent;
+          <div className="overflow-x-auto pb-4 pt-2 -mx-2 px-2">
+            <div className="h-[220px] min-w-[620px] flex items-end justify-between gap-2.5 pt-6 border-b border-slate-700 pr-4">
+              {maquinasLista.map(m => {
+                const qtd = porMaquinaFiltrado[m] || 0;
+                const maxQtd = Math.max(...Object.values(porMaquinaFiltrado), 1);
+                const heightPercent = (qtd / maxQtd) * 160;
+                const estaParada = maquinasParadas.includes(m);
+                const barHeight = estaParada ? Math.max(heightPercent, 28) : heightPercent;
 
-              return (
-                <div key={m} className="flex-1 flex flex-col items-center group">
-                  <div className="relative w-full flex justify-center">
-                    <span className={`absolute -top-7 text-[10px] font-bold ${estaParada ? "text-red-400 animate-pulse opacity-100 font-black" : "text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity"}`}>
-                      {estaParada ? "PARADA" : qtd}
+                return (
+                  <div key={m} className="flex-1 flex flex-col items-center group min-w-[22px]">
+                    <div className="relative w-full flex justify-center">
+                      <span className={`absolute -top-7 text-[10px] font-bold ${estaParada ? "text-red-400 animate-pulse opacity-100 font-black" : "text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity"}`}>
+                        {estaParada ? "PARADA" : qtd}
+                      </span>
+                      <div
+                        style={{ height: `${barHeight}px` }}
+                        className={`w-full max-w-[18px] rounded-t-sm transition-all duration-500 ${
+                          estaParada
+                            ? "bg-red-500 animate-pulse shadow-lg shadow-red-500/50 ring-2 ring-red-400 ring-offset-1 ring-offset-slate-800"
+                            : qtd > 0
+                            ? "bg-blue-500 shadow-md shadow-blue-500/20"
+                            : "bg-slate-700"
+                        }`}
+                      />
+                    </div>
+                    <span className={`text-[9px] font-bold mt-2 rotate-45 origin-left tracking-tight whitespace-nowrap block w-3 overflow-visible ${estaParada ? "text-red-400 font-black animate-pulse" : "text-slate-400"}`}>
+                      {m}
                     </span>
-                    <div
-                      style={{ height: `${barHeight}px` }}
-                      className={`w-full max-w-[18px] rounded-t-sm transition-all duration-500 ${
-                        estaParada
-                          ? "bg-red-500 animate-pulse shadow-lg shadow-red-500/50 ring-2 ring-red-400 ring-offset-1 ring-offset-slate-800"
-                          : qtd > 0
-                          ? "bg-blue-500 shadow-md shadow-blue-500/20"
-                          : "bg-slate-700"
-                      }`}
-                    />
                   </div>
-                  <span className={`text-[8px] font-bold mt-2 rotate-45 origin-left tracking-tight whitespace-nowrap block w-3 overflow-visible ${estaParada ? "text-red-400 font-black animate-pulse" : "text-slate-400"}`}>
-                    {m}
-                  </span>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
           <div className="pt-8 flex justify-end gap-4 text-xs font-semibold">
             <span className="flex items-center gap-1.5 text-slate-400">
