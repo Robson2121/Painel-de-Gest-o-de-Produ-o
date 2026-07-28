@@ -59,9 +59,9 @@ export default function LoginView({ onLoginSuccess, usuariosDisponiveis }: Login
       } else {
         setErro("Usuário não cadastrado.");
       }
-    } catch (err) {
-      console.error(err);
-      setErro("Erro de autenticação.");
+    } catch (err: any) {
+      console.error("Erro na autenticação:", err);
+      setErro(err?.message ? `Erro de autenticação: ${err.message}` : "Erro ao realizar autenticação.");
     } finally {
       setCarregando(false);
     }
