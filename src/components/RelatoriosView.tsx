@@ -4,13 +4,16 @@
  */
 
 import React, { useRef, useState } from "react";
-import { Table, Trash2, FileSpreadsheet, RefreshCw, UploadCloud, Clock, CheckSquare } from "lucide-react";
-import { PedidoCarrinho, OcorrenciaLider, Estatisticas } from "../types";
+import { Table, Trash2, FileSpreadsheet, FileText, RefreshCw, UploadCloud, Clock, CheckSquare, Filter, Layers } from "lucide-react";
+import { PedidoCarrinho, OcorrenciaLider, Estatisticas, Turno } from "../types";
+import { DEFAULT_TURNOS, pertenceAoTurno } from "../utils/turnos";
+import { exportarParaExcel, exportarParaWord } from "../utils/exportHelpers";
 
 interface RelatoriosViewProps {
   pedidos: PedidoCarrinho[];
   ocorrencias: OcorrenciaLider[];
   estatisticas: Estatisticas;
+  turnos?: Turno[];
   onZerarRelatorio: () => Promise<void>;
   onLimparHistoricoLider: () => Promise<void>;
   onSincronizar: () => Promise<void>;
@@ -21,55 +24,55 @@ export default function RelatoriosView({
   pedidos,
   ocorrencias,
   estatisticas,
+  turnos = DEFAULT_TURNOS,
   onZerarRelatorio,
   onLimparHistoricoLider,
   onSincronizar,
   onImportarCSV
 }: RelatoriosViewProps) {
+  const listaTurnos = turnos && turnos.length > 0 ? turnos : DEFAULT_TURNOS;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const [filtroTurnoId, setFiltroTurnoId] = useState<string>("TODOS");
   const [ocultarPendentes, setOcultarPendentes] = useState(false);
+  const [gerandoWord, setGerandoWord] = useState(false);
 
-  const chamadosResolvidos = ocorrencias.filter(o => o.status === "RESOLVIDA");
-  const pedidosEntregues = pedidos.filter(p => p.status === "FINALIZADO");
-  const exibidosPedidos = ocultarPendentes ? pedidos.filter(p => p.status === "FINALIZADO") : pedidos;
+  const turnoSelecionado = filtroTurnoId === "TODOS"
+    ? null
+    : listaTurnos.find(t => t.id === filtroTurnoId);
 
-  // Função para exportar os dados em formato CSV (compatível com Excel)
+  // Filtragem dos dados pelo turno selecionado
+  const pedidosFiltrados = turnoSelecionado
+    ? pedidos.filter(p => pertenceAoTurno(p.timestamp, turnoSelecionado))
+    : pedidos;
+
+  const ocorrenciasFiltradas = turnoSelecionado
+    ? ocorrencias.filter(o => pertenceAoTurno(o.timestamp, turnoSelecionado))
+    : ocorrencias;
+
+  const chamadosResolvidos = ocorrenciasFiltradas.filter(o => o.status === "RESOLVIDA");
+  const exibidosPedidos = ocultarPendentes
+    ? pedidosFiltrados.filter(p => p.status === "FINALIZADO")
+    : pedidosFiltrados;
+
+  // Exportação em Excel (.xlsx)
   const handleExportarExcel = () => {
-    let csvContent = "\uFEFFMaquina;Total Interacoes;Ultimo Status\n";
-    
-    // Lista de máquinas padrão
-    const maquinas = [
-      "K1014-1", "K1014-2", "K1014-3", "K1014-4", "K1014-6", "K1014-7",
-      "K1014-8", "K1014-9", "K1014-10", "K813-1", "K813-2", "K68-1",
-      "K68-2", "T-Line 1", "T-Line 2", "K1318", "TEUBERT"
-    ];
-
-    maquinas.forEach(m => {
-      const qtd = estatisticas.porMaquina[m] || 0;
-      const rawStatus = exibidosPedidos.find(p => p.maquina === m)?.pedido || "Normal";
-      // Sanitiza textos para evitar quebra de colunas ou linhas no arquivo CSV/Excel
-      const ultimoStatus = rawStatus.replace(/[\n\r;"]/g, " ").trim();
-      csvContent += `${m};${qtd};"${ultimoStatus}"\n`;
-    });
-
-    csvContent += "\n⏱️ HISTORICO DO LIDER\nMaquina;Ocorrencia Resolvida;Tempo Resposta\n";
-    chamadosResolvidos.forEach(h => {
-      const motivoSanitizado = h.motivo.replace(/[\n\r;"]/g, " ").trim();
-      const tempoSanitizado = (h.tempoResposta || "N/A").replace(/[\n\r;"]/g, " ").trim();
-      csvContent += `${h.maquina};"${motivoSanitizado}";${tempoSanitizado}\n`;
-    });
-
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `relatorio_producao_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    exportarParaExcel(pedidosFiltrados, ocorrenciasFiltradas, estatisticas, listaTurnos);
   };
 
-  // Função para importar o CSV e parsear no React
+  // Exportação em Word (.docx)
+  const handleExportarWord = async () => {
+    setGerandoWord(true);
+    try {
+      await exportarParaWord(pedidosFiltrados, ocorrenciasFiltradas, estatisticas, listaTurnos);
+    } catch (e) {
+      console.error("Erro ao exportar Word:", e);
+    } finally {
+      setGerandoWord(false);
+    }
+  };
+
+  // Importar CSV
   const handleImportarCSV = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -124,17 +127,34 @@ export default function RelatoriosView({
 
   return (
     <div className="space-y-6" id="relatorios-view">
-      {/* Controles do Cabeçalho */}
-      <div className="bg-slate-800 border border-slate-700 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* Controles do Cabeçalho e Botões de Exportação */}
+      <div className="bg-slate-800 border border-slate-700 p-5 rounded-2xl flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h3 className="text-white font-bold text-base flex items-center gap-2">
             <Table className="h-5 w-5 text-blue-400" />
-            Centro de Inteligência de Relatórios
+            Centro Local de Gerador de Relatórios (Word & Excel)
           </h3>
-          <p className="text-xs text-slate-400">Exporte, importe ou sincronize dados consolidados do turno atual.</p>
+          <p className="text-xs text-slate-400">Exporte relatórios oficiais em arquivo Word (.docx) ou planilha Excel (.xlsx) com divisão por turnos.</p>
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {/* Filtro de Turno */}
+          <div className="flex items-center gap-1 bg-slate-900 px-2 py-1.5 rounded-xl border border-slate-700">
+            <Filter className="h-3.5 w-3.5 text-slate-400" />
+            <select
+              value={filtroTurnoId}
+              onChange={(e) => setFiltroTurnoId(e.target.value)}
+              className="bg-transparent text-white text-xs font-bold focus:outline-none cursor-pointer"
+            >
+              <option value="TODOS" className="bg-slate-900 text-white">Todos os Turnos</option>
+              {listaTurnos.map(t => (
+                <option key={t.id} value={t.id} className="bg-slate-900 text-white">
+                  {t.nome} ({t.inicio} - {t.termino})
+                </option>
+              ))}
+            </select>
+          </div>
+
           <button
             onClick={async () => {
               await onSincronizar();
@@ -151,7 +171,7 @@ export default function RelatoriosView({
             className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 font-bold text-xs rounded-xl text-slate-300 hover:text-white border border-slate-600 transition-colors cursor-pointer"
           >
             <UploadCloud className="h-4 w-4" />
-            Carregar CSV
+            CSV
           </button>
           <input
             type="file"
@@ -161,12 +181,25 @@ export default function RelatoriosView({
             className="hidden"
           />
 
+          {/* Exportar Excel */}
           <button
             onClick={handleExportarExcel}
             className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 font-bold text-xs rounded-xl text-white shadow-md shadow-emerald-500/10 transition-colors cursor-pointer"
+            title="Exportar para arquivo Excel (.xlsx)"
           >
             <FileSpreadsheet className="h-4 w-4" />
-            Salvar Excel (CSV)
+            Exportar Excel (.xlsx)
+          </button>
+
+          {/* Exportar Word */}
+          <button
+            onClick={handleExportarWord}
+            disabled={gerandoWord}
+            className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 font-bold text-xs rounded-xl text-white shadow-md shadow-blue-500/10 transition-colors cursor-pointer disabled:opacity-50"
+            title="Exportar para documento Word (.docx)"
+          >
+            <FileText className="h-4 w-4" />
+            {gerandoWord ? "Gerando Word..." : "Exportar Word (.docx)"}
           </button>
 
           <button
@@ -182,12 +215,56 @@ export default function RelatoriosView({
         </div>
       </div>
 
+      {/* PAINEL CONSOLIDADO DE PRODUÇÃO POR TURNO */}
+      <div className="bg-slate-800 border border-slate-700 p-6 rounded-2xl space-y-4">
+        <h3 className="text-lg font-bold text-white flex items-center gap-2">
+          <Layers className="h-5 w-5 text-amber-400" />
+          Consolidação de Múltiplos Turnos
+        </h3>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {listaTurnos.map(t => {
+            const pTurno = pedidos.filter(p => pertenceAoTurno(p.timestamp, t));
+            const oTurno = ocorrencias.filter(o => pertenceAoTurno(o.timestamp, t));
+            const ent = pTurno.filter(p => p.status === "FINALIZADO").length;
+            const res = oTurno.filter(o => o.status === "RESOLVIDA").length;
+
+            return (
+              <div
+                key={t.id}
+                className={`p-4 rounded-xl border space-y-2 ${
+                  filtroTurnoId === t.id
+                    ? "bg-amber-500/10 border-amber-500/40 text-white"
+                    : "bg-slate-900/60 border-slate-700 text-slate-300"
+                }`}
+              >
+                <div className="flex items-center justify-between border-b border-slate-700/60 pb-2">
+                  <span className="font-extrabold text-sm">{t.nome}</span>
+                  <span className="text-xs font-mono text-amber-400">{t.inicio} - {t.termino}</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">Carrinhos:</span>
+                    <span className="font-bold text-blue-400">{pTurno.length} total ({ent} entregues)</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">Ocorrências:</span>
+                    <span className="font-bold text-red-400">{oTurno.length} total ({res} resolvidas)</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Fluxo de Carrinhos Ativos */}
         <div className="bg-slate-800 border border-slate-700 p-6 rounded-2xl space-y-4">
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
             <CheckSquare className="h-5 w-5 text-emerald-400" />
-            Fluxo de Carrinhos Ativos
+            Fluxo de Carrinhos Ativos ({turnoSelecionado ? turnoSelecionado.nome : "Todos os Turnos"})
           </h3>
 
           <div className="overflow-x-auto">
@@ -195,21 +272,21 @@ export default function RelatoriosView({
               <thead>
                 <tr className="text-slate-400 text-xs font-semibold uppercase text-left">
                   <th className="py-3 px-4 bg-slate-900/60 rounded-l-xl">Máquina</th>
-                  <th className="py-3 px-4 bg-slate-900/60">Carrinhos Solicitados</th>
-                  <th className="py-3 px-4 bg-slate-900/60">Status</th>
-                  <th className="py-3 px-4 bg-slate-900/60 rounded-r-xl text-right">Qtd</th>
+                  <th className="py-3 px-4 bg-slate-900/60">Solicitação</th>
+                  <th className="py-3 px-4 bg-slate-900/60">Turno</th>
+                  <th className="py-3 px-4 bg-slate-900/60 rounded-r-xl text-right">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/50">
                 {exibidosPedidos.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="py-6 text-center text-slate-500 text-xs">
-                      Nenhum carrinho registrado no momento.
+                      Nenhum carrinho registrado para este filtro de turno.
                     </td>
                   </tr>
                 ) : (
                   exibidosPedidos.map(p => {
-                    const interacoes = estatisticas.porMaquina[p.maquina] || 1;
+                    const turnoNome = listaTurnos.find(t => pertenceAoTurno(p.timestamp, t))?.nome || "Indefinido";
                     return (
                       <tr key={p.id} className="text-slate-300 hover:bg-slate-900/20 transition-colors">
                         <td className="py-3 px-4 font-bold text-white">{p.maquina}</td>
@@ -219,6 +296,11 @@ export default function RelatoriosView({
                           </span>
                         </td>
                         <td className="py-3 px-4">
+                          <span className="inline-block bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px] font-bold px-2 py-0.5 rounded-lg">
+                            {turnoNome.split(" ")[0]}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">
                           {p.status === "FINALIZADO" ? (
                             <span className="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold px-2 py-0.5 rounded-lg uppercase">
                               Entregue
@@ -229,7 +311,6 @@ export default function RelatoriosView({
                             </span>
                           )}
                         </td>
-                        <td className="py-3 px-4 text-right font-bold text-blue-400">{interacoes}</td>
                       </tr>
                     );
                   })
@@ -261,28 +342,37 @@ export default function RelatoriosView({
                 <tr className="text-slate-400 text-xs font-semibold uppercase text-left">
                   <th className="py-3 px-4 bg-slate-900/60 rounded-l-xl">Máquina</th>
                   <th className="py-3 px-4 bg-slate-900/60">Ocorrência</th>
+                  <th className="py-3 px-4 bg-slate-900/60">Turno</th>
                   <th className="py-3 px-4 bg-slate-900/60 rounded-r-xl text-right">Tempo Resposta</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/50">
                 {chamadosResolvidos.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="py-6 text-center text-slate-500 text-xs">
+                    <td colSpan={4} className="py-6 text-center text-slate-500 text-xs">
                       Nenhum chamado de parada resolvido neste turno.
                     </td>
                   </tr>
                 ) : (
-                  chamadosResolvidos.map(h => (
-                    <tr key={h.id} className="text-slate-300 hover:bg-slate-900/20 transition-colors">
-                      <td className="py-3 px-4 font-bold text-white">{h.maquina}</td>
-                      <td className="py-3 px-4 text-xs max-w-[200px] truncate">{h.motivo}</td>
-                      <td className="py-3 px-4 text-right">
-                        <span className="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold px-2 py-0.5 rounded-lg">
-                          ⏱️ {h.tempoResposta || "N/A"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
+                  chamadosResolvidos.map(h => {
+                    const turnoNome = listaTurnos.find(t => pertenceAoTurno(h.timestamp, t))?.nome || "Indefinido";
+                    return (
+                      <tr key={h.id} className="text-slate-300 hover:bg-slate-900/20 transition-colors">
+                        <td className="py-3 px-4 font-bold text-white">{h.maquina}</td>
+                        <td className="py-3 px-4 text-xs max-w-[150px] truncate">{h.motivo}</td>
+                        <td className="py-3 px-4">
+                          <span className="inline-block bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px] font-bold px-2 py-0.5 rounded-lg">
+                            {turnoNome.split(" ")[0]}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <span className="inline-block bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold px-2 py-0.5 rounded-lg">
+                            ⏱️ {h.tempoResposta || "N/A"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

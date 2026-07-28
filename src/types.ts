@@ -29,6 +29,13 @@ export interface Usuario {
   senha?: string;
 }
 
+export interface Turno {
+  id: string;
+  nome: string;
+  inicio: string; // Formato HH:mm (ex: "06:00")
+  termino: string; // Formato HH:mm (ex: "14:00")
+}
+
 export interface Estatisticas {
   total: number;
   porMaquina: Record<string, number>;

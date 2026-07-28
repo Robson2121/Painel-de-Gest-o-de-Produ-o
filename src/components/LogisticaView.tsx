@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { Landmark, Check, Clock, Radio, RefreshCw } from "lucide-react";
+import { Landmark, Check, Clock, Radio } from "lucide-react";
 import { PedidoCarrinho } from "../types";
 
 interface LogisticaViewProps {
@@ -13,44 +13,70 @@ interface LogisticaViewProps {
   onSincronizar?: () => Promise<void>;
 }
 
-export default function LogisticaView({ pedidos, onFinalizarPedido, onSincronizar }: LogisticaViewProps) {
-  const [segundosDecorridos, setSegundosDecorridos] = useState<Record<number, number>>({});
+export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaViewProps) {
+  const [currentTime, setCurrentTime] = useState(Date.now());
+  const [serverOffset, setServerOffset] = useState(0);
   const pedidosAtivos = pedidos.filter(p => p.status !== "FINALIZADO");
 
-  const obterTimestampSeguro = (p: PedidoCarrinho) => {
-    if (typeof p.timestamp === "number" && !isNaN(p.timestamp) && p.timestamp > 0) {
-      return p.timestamp;
-    }
-    if (typeof p.timestamp === "string") {
-      const parsed = parseInt(p.timestamp, 10);
-      if (!isNaN(parsed) && parsed > 0) return parsed;
-    }
-    if (typeof p.id === "number" && !isNaN(p.id) && p.id > 0) {
-      return p.id;
-    }
-    if (typeof p.id === "string") {
-      const parsed = parseInt(p.id, 10);
-      if (!isNaN(parsed) && parsed > 0) return parsed;
-    }
-    return Date.now();
-  };
-
-  // Efeito para atualizar os cronômetros progressivos de cada cartão a cada segundo
   useEffect(() => {
-    const interval = setInterval(() => {
-      setSegundosDecorridos(prev => {
-        const next: Record<number, number> = {};
-        pedidosAtivos.forEach(p => {
-          const ts = obterTimestampSeguro(p);
-          const ageInSeconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-          next[p.id] = ageInSeconds;
-        });
-        return next;
-      });
-    }, 1000);
+    // Sincroniza o relógio do cliente com o do servidor para precisão do tempo de espera
+    const sincronizarRelogio = async () => {
+      try {
+        const start = Date.now();
+        const res = await fetch("/api/pedidos", { method: "HEAD" });
+        const end = Date.now();
+        const serverDateHeader = res.headers.get("Date");
+        if (serverDateHeader) {
+          const serverTime = new Date(serverDateHeader).getTime();
+          const latency = (end - start) / 2;
+          const adjustedServerTime = serverTime + latency;
+          const offset = Date.now() - adjustedServerTime;
+          setServerOffset(offset);
+        }
+      } catch (err) {
+        console.warn("Falha ao sincronizar relógio com servidor:", err);
+      }
+    };
+    sincronizarRelogio();
+  }, []);
 
-    return () => clearInterval(interval);
-  }, [pedidosAtivos]);
+  // Ticker de 1 segundo para atualizar o tempo decorrido ao vivo
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const obterTimestampSeguro = (p: PedidoCarrinho) => {
+    if (p.timestamp) {
+      if (typeof p.timestamp === "number" && !isNaN(p.timestamp) && p.timestamp > 0) {
+        return p.timestamp;
+      }
+      if (typeof p.timestamp === "string") {
+        if (/^\d+$/.test(p.timestamp)) {
+          const parsed = parseInt(p.timestamp, 10);
+          if (!isNaN(parsed) && parsed > 0) return parsed;
+        }
+        const parsedDate = Date.parse(p.timestamp);
+        if (!isNaN(parsedDate) && parsedDate > 0) return parsedDate;
+      }
+    }
+    if (p.id) {
+      if (typeof p.id === "number" && !isNaN(p.id) && p.id > 0) {
+        return p.id;
+      }
+      if (typeof p.id === "string") {
+        if (/^\d+$/.test(p.id)) {
+          const parsed = parseInt(p.id, 10);
+          if (!isNaN(parsed) && parsed > 0) return parsed;
+        }
+        const parsedDate = Date.parse(p.id);
+        if (!isNaN(parsedDate) && parsedDate > 0) return parsedDate;
+      }
+    }
+    return Date.now() - serverOffset;
+  };
 
   const formatarTempo = (segundosTotais: number) => {
     if (segundosTotais < 60) {
@@ -74,15 +100,14 @@ export default function LogisticaView({ pedidos, onFinalizarPedido, onSincroniza
           </div>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto">
-          {onSincronizar && (
-            <button
-              onClick={onSincronizar}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 font-bold text-xs rounded-lg text-slate-300 hover:text-white border border-slate-600 transition-colors cursor-pointer mr-1"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Sincronizar
-            </button>
-          )}
+          <span className={`flex items-center gap-2 text-xs font-bold px-3 py-1.5 rounded-full border ${
+            pedidosAtivos.length > 0 
+              ? "text-blue-400 bg-blue-500/10 border-blue-500/20" 
+              : "text-slate-400 bg-slate-700/40 border-slate-600/50"
+          }`}>
+            <Clock className="h-3.5 w-3.5" />
+            Solicitações Pendentes: <strong className="text-white font-extrabold">{pedidosAtivos.length}</strong>
+          </span>
           <span className="flex items-center gap-2 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-full border border-emerald-500/20">
             <Radio className="h-3.5 w-3.5 text-emerald-400 animate-pulse" />
             Servidor Conectado
@@ -102,7 +127,7 @@ export default function LogisticaView({ pedidos, onFinalizarPedido, onSincroniza
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {pedidosAtivos.map(p => {
             const ts = obterTimestampSeguro(p);
-            const segundos = segundosDecorridos[p.id] !== undefined ? segundosDecorridos[p.id] : Math.max(0, Math.floor((Date.now() - ts) / 1000));
+            const segundos = Math.max(0, Math.floor((currentTime - serverOffset - ts) / 1000));
             const urgenciaAlta = segundos > 180;
             const urgenciaMedia = segundos > 60 && segundos <= 180;
 

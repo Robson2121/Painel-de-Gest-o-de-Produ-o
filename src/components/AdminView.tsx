@@ -3,25 +3,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
-import { Users, Shield, ShieldAlert, Trash2, Key, UserPlus } from "lucide-react";
-import { Usuario } from "../types";
+import React, { useState, useEffect } from "react";
+import { Users, Shield, ShieldAlert, Trash2, Key, UserPlus, Clock, Plus, Save, RotateCcw } from "lucide-react";
+import { Usuario, Turno } from "../types";
+import { DEFAULT_TURNOS, obterTurnoAtual } from "../utils/turnos";
 
 interface AdminViewProps {
   usuarios: Usuario[];
   ipsBloqueados: { ip: string; tentativas: number }[];
+  turnos: Turno[];
   onAdicionarUsuario: (login: string, cargo: Usuario["cargo"], senha?: string) => Promise<void>;
   onExcluirUsuario: (id: string) => Promise<void>;
   onDesbloquearIp: (ip: string) => Promise<void>;
+  onSalvarTurnos: (novosTurnos: Turno[]) => Promise<void>;
   usuarioLogado: Usuario;
 }
 
 export default function AdminView({
   usuarios,
   ipsBloqueados,
+  turnos,
   onAdicionarUsuario,
   onExcluirUsuario,
   onDesbloquearIp,
+  onSalvarTurnos,
   usuarioLogado
 }: AdminViewProps) {
   const [novoLogin, setNovoLogin] = useState("");
@@ -29,6 +34,22 @@ export default function AdminView({
   const [novaSenha, setNovaSenha] = useState("");
   const [status, setStatus] = useState("");
   const [erro, setErro] = useState("");
+
+  // Estado dos turnos
+  const [listaTurnos, setListaTurnos] = useState<Turno[]>([]);
+  const [statusTurno, setStatusTurno] = useState("");
+  const [erroTurno, setErroTurno] = useState("");
+  const [salvandoTurnos, setSalvandoTurnos] = useState(false);
+
+  useEffect(() => {
+    if (turnos && turnos.length > 0) {
+      setListaTurnos(turnos);
+    } else {
+      setListaTurnos(DEFAULT_TURNOS);
+    }
+  }, [turnos]);
+
+  const turnoAtivoAgora = obterTurnoAtual(listaTurnos);
 
   const handleAdicionar = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,8 +91,197 @@ export default function AdminView({
     }
   };
 
+  // Funções dos Turnos
+  const handleAlterarCampoTurno = (index: number, campo: keyof Turno, valor: string) => {
+    const copia = [...listaTurnos];
+    copia[index] = { ...copia[index], [campo]: valor };
+    setListaTurnos(copia);
+  };
+
+  const handleAdicionarTurno = () => {
+    const id = `t_${Date.now()}`;
+    const novoIndex = listaTurnos.length + 1;
+    const novo: Turno = {
+      id,
+      nome: `${novoIndex}º Turno Extra`,
+      inicio: "08:00",
+      termino: "16:00"
+    };
+    setListaTurnos([...listaTurnos, novo]);
+  };
+
+  const handleRemoverTurno = (id: string) => {
+    if (listaTurnos.length <= 1) {
+      setErroTurno("O sistema precisa ter pelo menos 1 turno ativo.");
+      return;
+    }
+    setListaTurnos(listaTurnos.filter(t => t.id !== id));
+  };
+
+  const handleRestaurarPadraoTurnos = () => {
+    setListaTurnos(DEFAULT_TURNOS);
+  };
+
+  const handleSalvarTodosTurnos = async () => {
+    setStatusTurno("");
+    setErroTurno("");
+    setSalvandoTurnos(true);
+
+    try {
+      await onSalvarTurnos(listaTurnos);
+      setStatusTurno("✅ Configuração de turnos salva e aplicada com sucesso!");
+      setTimeout(() => setStatusTurno(""), 4000);
+    } catch (e: any) {
+      setErroTurno(e.message || "Erro ao salvar turnos.");
+    } finally {
+      setSalvandoTurnos(false);
+    }
+  };
+
   return (
     <div className="space-y-6" id="admin-view">
+      {/* SEÇÃO 1: CONFIGURAÇÃO DE TURNOS DA FÁBRICA */}
+      <div className="bg-slate-800 border border-slate-700 p-6 rounded-2xl space-y-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-700/80 pb-4">
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Clock className="h-5.5 w-5.5 text-amber-400" />
+              Configuração de Turnos Operacionais
+            </h3>
+            <p className="text-slate-400 text-xs mt-0.5">
+              Defina os horários de início e término dos turnos de produção para diferenciar os relatórios e métricas da Dashboard.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400 font-semibold">Turno Ativo Agora:</span>
+            <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-black rounded-lg flex items-center gap-1.5 animate-pulse">
+              <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
+              {turnoAtivoAgora.nome} ({turnoAtivoAgora.inicio} às {turnoAtivoAgora.termino})
+            </span>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 font-semibold text-xs text-slate-400 uppercase tracking-wider px-1 hidden md:grid">
+            <div className="col-span-4">Nome do Turno</div>
+            <div className="col-span-3">Início (HH:mm)</div>
+            <div className="col-span-3">Término (HH:mm)</div>
+            <div className="col-span-2 text-right">Ação</div>
+          </div>
+
+          {listaTurnos.map((t, index) => {
+            const isAtual = t.id === turnoAtivoAgora.id;
+            return (
+              <div
+                key={t.id}
+                className={`grid grid-cols-1 md:grid-cols-12 gap-3 items-center p-3 rounded-xl border transition-all ${
+                  isAtual
+                    ? "bg-amber-500/10 border-amber-500/30 text-white"
+                    : "bg-slate-900/50 border-slate-700 text-slate-300"
+                }`}
+              >
+                <div className="col-span-4">
+                  <label className="text-[10px] uppercase font-bold text-slate-400 block md:hidden mb-1">
+                    Nome do Turno
+                  </label>
+                  <input
+                    type="text"
+                    value={t.nome}
+                    onChange={(e) => handleAlterarCampoTurno(index, "nome", e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm font-bold"
+                    placeholder="Ex: 1º Turno (Manhã)"
+                  />
+                </div>
+
+                <div className="col-span-3">
+                  <label className="text-[10px] uppercase font-bold text-slate-400 block md:hidden mb-1">
+                    Horário de Início
+                  </label>
+                  <input
+                    type="time"
+                    value={t.inicio}
+                    onChange={(e) => handleAlterarCampoTurno(index, "inicio", e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm font-mono font-bold"
+                  />
+                </div>
+
+                <div className="col-span-3">
+                  <label className="text-[10px] uppercase font-bold text-slate-400 block md:hidden mb-1">
+                    Horário de Término
+                  </label>
+                  <input
+                    type="time"
+                    value={t.termino}
+                    onChange={(e) => handleAlterarCampoTurno(index, "termino", e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm font-mono font-bold"
+                  />
+                </div>
+
+                <div className="col-span-2 text-right flex items-center justify-end gap-2">
+                  {isAtual && (
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-1 rounded-md font-bold">
+                      EM ATUAÇÃO
+                    </span>
+                  )}
+                  <button
+                    onClick={() => handleRemoverTurno(t.id)}
+                    className="p-2 bg-red-500/15 border border-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition-all cursor-pointer"
+                    title="Excluir este turno"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {statusTurno && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl font-bold text-xs text-center">
+            {statusTurno}
+          </div>
+        )}
+        {erroTurno && (
+          <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl font-bold text-xs text-center">
+            {erroTurno}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleAdicionarTurno}
+              className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-600"
+            >
+              <Plus className="h-4 w-4" />
+              Adicionar Novo Turno
+            </button>
+
+            <button
+              type="button"
+              onClick={handleRestaurarPadraoTurnos}
+              className="px-4 py-2 bg-slate-700/60 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold rounded-xl text-xs flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-700"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Restaurar Padrão (3 Turnos)
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSalvarTodosTurnos}
+            disabled={salvandoTurnos}
+            className="px-6 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-amber-500/15 transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <Save className="h-4 w-4" />
+            {salvandoTurnos ? "Salvando Turnos..." : "Salvar Configuração de Turnos"}
+          </button>
+        </div>
+      </div>
+
+      {/* SEÇÃO 2: USUÁRIOS E SEGURANÇA */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Cadastrar Usuário */}
         <div className="bg-slate-800 border border-slate-700 p-6 rounded-2xl space-y-4">

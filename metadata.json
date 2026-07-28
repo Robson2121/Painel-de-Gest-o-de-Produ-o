@@ -1,6 +1,6 @@
 {
   "name": "Industrial Management & Dashboard",
-  "description": "Sistema integrado de gestão de produção industrial com dashboard de BI, controle de logística, painel de paradas do líder e relatórios inteligentes de IA.",
+  "description": "Sistema integrado de gestão de produção industrial com controle de turnos operacionais, exportação de relatórios em Word e Excel, controle de logística e painel de paradas do líder.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

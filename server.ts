@@ -54,6 +54,19 @@ interface Usuario {
   senha?: string;
 }
 
+interface Turno {
+  id: string;
+  nome: string;
+  inicio: string;
+  termino: string;
+}
+
+const DEFAULT_TURNOS: Turno[] = [
+  { id: "t1", nome: "1º Turno (Manhã)", inicio: "06:00", termino: "14:00" },
+  { id: "t2", nome: "2º Turno (Tarde)", inicio: "14:00", termino: "22:00" },
+  { id: "t3", nome: "3º Turno (Noite)", inicio: "22:00", termino: "06:00" },
+];
+
 const INITIAL_USUARIOS: Usuario[] = [
   { id: "1", login: "admin", cargo: "ADMIN", senha: "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918" }, // admin
   { id: "2", login: "lider1", cargo: "LIDER", senha: "0afc392fd9f3f97a2fce42529878f57fa6ce6396e1f8047d17c3fb995735ca99" }, // lider1
@@ -75,7 +88,8 @@ let localDatabase = {
   pedidos: [] as PedidoCarrinho[],
   ocorrencias: [] as OcorrenciaLider[],
   usuarios: [...INITIAL_USUARIOS] as Usuario[],
-  ipsBloqueados: [] as { ip: string; tentativas: number }[]
+  ipsBloqueados: [] as { ip: string; tentativas: number }[],
+  turnos: [...DEFAULT_TURNOS] as Turno[]
 };
 
 const LOCAL_DB_PATH = path.join(process.cwd(), "db.json");
@@ -200,16 +214,22 @@ async function addPedido(pedido: PedidoCarrinho): Promise<void> {
   saveLocalDb();
 }
 
-async function deletePedido(id: number): Promise<void> {
+async function deletePedido(id: number | string): Promise<void> {
+  const numericId = typeof id === "number" ? id : parseInt(String(id), 10);
+  const targetId = isNaN(numericId) ? id : numericId;
+
   if (isConnectedToMongo && mongoDb) {
     try {
-      await mongoDb.collection("pedidos").updateOne({ id }, { $set: { status: "FINALIZADO" } });
+      await mongoDb.collection("pedidos").updateOne(
+        { $or: [{ id: targetId }, { id: String(id) }, { id: Number(id) }] },
+        { $set: { status: "FINALIZADO" } }
+      );
       return;
     } catch (e) {
       console.error("Erro ao finalizar pedido no MongoDB, usando cache local:", e);
     }
   }
-  const idx = localDatabase.pedidos.findIndex(p => p.id === id);
+  const idx = localDatabase.pedidos.findIndex(p => String(p.id) === String(id) || p.id === targetId);
   if (idx !== -1) {
     localDatabase.pedidos[idx].status = "FINALIZADO";
   }
@@ -248,11 +268,14 @@ async function addOcorrencia(ocorrencia: OcorrenciaLider): Promise<void> {
   saveLocalDb();
 }
 
-async function resolverOcorrencia(id: number, tempoResposta: string): Promise<void> {
+async function resolverOcorrencia(id: number | string, tempoResposta: string): Promise<void> {
+  const numericId = typeof id === "number" ? id : parseInt(String(id), 10);
+  const targetId = isNaN(numericId) ? id : numericId;
+
   if (isConnectedToMongo && mongoDb) {
     try {
       await mongoDb.collection("ocorrencias").updateOne(
-        { id },
+        { $or: [{ id: targetId }, { id: String(id) }, { id: Number(id) }] },
         { $set: { status: "RESOLVIDA", tempoResposta } }
       );
       return;
@@ -260,7 +283,7 @@ async function resolverOcorrencia(id: number, tempoResposta: string): Promise<vo
       console.error("Erro ao resolver ocorrência no MongoDB, usando cache local:", e);
     }
   }
-  const idx = localDatabase.ocorrencias.findIndex(o => o.id === id);
+  const idx = localDatabase.ocorrencias.findIndex(o => String(o.id) === String(id) || o.id === targetId);
   if (idx !== -1) {
     localDatabase.ocorrencias[idx].status = "RESOLVIDA";
     localDatabase.ocorrencias[idx].tempoResposta = tempoResposta;
@@ -386,6 +409,39 @@ async function resetOcorrenciasResolvidas(): Promise<void> {
     }
   }
   localDatabase.ocorrencias = localDatabase.ocorrencias.filter(o => o.status !== "RESOLVIDA");
+  saveLocalDb();
+}
+
+async function getTurnos(): Promise<Turno[]> {
+  if (isConnectedToMongo && mongoDb) {
+    try {
+      const list = await mongoDb.collection("turnos").find({}).toArray();
+      if (list.length > 0) {
+        return list.map((t: any) => {
+          const { _id, ...rest } = t;
+          return rest as Turno;
+        });
+      }
+    } catch (e) {
+      console.error("Erro ao ler turnos no MongoDB, usando cache local:", e);
+    }
+  }
+  return localDatabase.turnos || DEFAULT_TURNOS;
+}
+
+async function saveTurnos(turnosList: Turno[]): Promise<void> {
+  if (isConnectedToMongo && mongoDb) {
+    try {
+      await mongoDb.collection("turnos").deleteMany({});
+      if (turnosList.length > 0) {
+        await mongoDb.collection("turnos").insertMany(turnosList);
+      }
+      return;
+    } catch (e) {
+      console.error("Erro ao salvar turnos no MongoDB, usando cache local:", e);
+    }
+  }
+  localDatabase.turnos = turnosList;
   saveLocalDb();
 }
 
@@ -711,121 +767,28 @@ async function startServer() {
     }
   });
 
-  // --- INTEGRAÇÃO COM GEMINI API PARA ANÁLISE DE DADOS INTELIGENTE ---
-  app.post("/api/analise-ia", async (req, res) => {
-    let listPedidos = [];
-    let listOcorrencias = [];
+  // --- CONFIGURAÇÃO DE TURNOS ---
+  app.get("/api/turnos", async (req, res) => {
     try {
-      listPedidos = await getPedidos();
-      listOcorrencias = await getOcorrencias();
-    } catch (dbErr) {
-      console.error("Erro ao carregar dados do banco para análise:", dbErr);
+      const list = await getTurnos();
+      res.json(list);
+    } catch (err: any) {
+      console.error("Erro no GET /api/turnos:", err);
+      res.status(500).json({ error: err.message });
     }
+  });
 
-    const resumoPedidos = listPedidos.map(p => ({
-      maquina: p.maquina,
-      pedido: p.pedido,
-      data: p.data
-    }));
-
-    const resumoOcorrencias = listOcorrencias.map(o => ({
-      maquina: o.maquina,
-      motivo: o.motivo,
-      status: o.status,
-      tempoResposta: o.tempoResposta || "Ainda ativa"
-    }));
-
-    const prompt = `Como um engenheiro de dados industrial especializado em Lean Manufacturing e Seis Sigma, analise o seguinte histórico de produção da nossa fábrica de injetoras plásticas.
-
-DADOS DE SOLICITAÇÃO DE CARRINHOS (LOGÍSTICA):
-${JSON.stringify(resumoPedidos.slice(-15), null, 2)}
-
-DADOS DE OCORRÊNCIAS DE PARADAS DE MÁQUINA (LÍDER):
-${JSON.stringify(resumoOcorrencias.slice(-15), null, 2)}
-
-Escreva um relatório estruturado e perspicaz (em português do Brasil) cobrindo:
-1. **Principais Gargalos de Logística**: Quais máquinas estão solicitando mais carrinhos e qual o provável impacto no fluxo de materiais.
-2. **Análise Crítica de Falhas de Equipamentos**: Quais falhas de máquina ("Peça Esfarelando no Bico", "Peça Enroscada no Molde", etc.) são mais recorrentes, indicando o que as causas-raiz físicas mais prováveis seriam (por exemplo, problemas de temperatura no bico de injeção, falha de lubrificação ou desgaste de molde).
-3. **Métricas de Resposta**: Avalie a eficiência da liderança e manutenção com base nos tempos de resposta reais registrados.
-4. **Plano de Ação Sugerido (Rápido)**: 3 ações imediatas de manutenção preventiva ou ajustes operacionais para as injetoras mais problemáticas (como a K1014-1).
-
-Mantenha o tom profissional, direto e acionável. Utilize formatação Markdown limpa e amigável para exibição em dashboard.`;
-
-    // Função de retentativas com recuo exponencial
-    const maxRetries = 3;
-    let delay = 1000;
-    let apiSuccess = false;
-    let respostaTexto = "";
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        const response = await getAi().models.generateContent({
-          model: "gemini-3.5-flash",
-          contents: prompt,
-          config: {
-            systemInstruction: "Você é um consultor sênior de manufatura enxuta (Lean Manufacturing) e análise de BI para gerenciamento industrial."
-          }
-        });
-        if (response && response.text) {
-          respostaTexto = response.text;
-          apiSuccess = true;
-          break;
-        }
-      } catch (apiError: any) {
-        console.warn(`[Tentativa ${attempt}/${maxRetries}] Erro ao chamar Gemini:`, apiError?.message || apiError);
-        if (attempt < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, delay));
-          delay *= 2; // backoff exponencial
-        }
-      }
+  app.post("/api/turnos", async (req, res) => {
+    const { turnos } = req.body;
+    if (!Array.isArray(turnos)) {
+      return res.status(400).json({ error: "Lista de turnos inválida." });
     }
-
-    if (apiSuccess) {
-      res.json({ analise: respostaTexto });
-    } else {
-      // Se todas as tentativas falharem (como erro 503 de alta demanda), gera uma análise local dinâmica e polida
-      console.info("Gerando relatório de contingência local estruturado devido à indisponibilidade temporária da API Gemini.");
-      
-      const porMaquinaPedidos: Record<string, number> = {};
-      listPedidos.forEach(p => { porMaquinaPedidos[p.maquina] = (porMaquinaPedidos[p.maquina] || 0) + 1; });
-      const topPedidos = Object.entries(porMaquinaPedidos).sort((a,b) => b[1] - a[1]).slice(0, 3);
-
-      const porMaquinaOcorrencias: Record<string, number> = {};
-      const porMotivoOcorrencias: Record<string, number> = {};
-      listOcorrencias.forEach(o => { 
-        porMaquinaOcorrencias[o.maquina] = (porMaquinaOcorrencias[o.maquina] || 0) + 1; 
-        porMotivoOcorrencias[o.motivo] = (porMotivoOcorrencias[o.motivo] || 0) + 1; 
-      });
-      const topOcorrencias = Object.entries(porMaquinaOcorrencias).sort((a,b) => b[1] - a[1]).slice(0, 3);
-      const topMotivos = Object.entries(porMotivoOcorrencias).sort((a,b) => b[1] - a[1]).slice(0, 3);
-
-      const fallbackText = `### ⚠️ Relatório de Análise Inteligente de Contingência
-*Nota: A API do Gemini está temporariamente indisponível devido a picos de alta demanda. Geramos esta análise automatizada local com base nos dados reais do sistema.*
-
----
-
-### 1. **Principais Gargalos de Logística**
-Analisando o fluxo de carrinhos de abastecimento, identificamos as máquinas com maior ritmo de solicitações:
-${topPedidos.length > 0 
-  ? topPedidos.map(([maq, qtd]) => `- **Injetora ${maq}**: total de **${qtd} solicitações** registradas no histórico. Recomenda-se calibrar a cadência de reabastecimento para que não haja microparadas de produção.`).join("\n") 
-  : "- Não há histórico suficiente de solicitações de carrinho para mapear gargalos operacionais."}
-
-### 2. **Análise Crítica de Falhas de Equipamentos**
-Com base nos chamados registrados pela liderança de turno, as falhas mais recorrentes e suas causas-raiz prováveis são:
-${topMotivos.length > 0 
-  ? topMotivos.map(([motivo, qtd]) => `- **${motivo}** (registrado ${qtd} vezes): Prováveis causas físicas incluem flutuação de temperatura nos termopares, desgaste de vedação nas gavetas ou contaminação na resina plástica.`).join("\n") 
-  : "- Nenhuma parada ou falha crítica registrada no momento. Excelente estabilidade operacional!"}
-
-### 3. **Métricas de Resposta e Eficiência**
-- **Equipamentos com maior número de intervenções**: ${topOcorrencias.map(([maq, qtd]) => `${maq} (${qtd} paradas)`).join(", ") || "Nenhum no momento"}.
-- **Status do Atendimento**: Os tempos de resposta da liderança indicam que o fluxo de detecção e correção está ativo, visando diminuir o tempo improdutivo (Downtime).
-
-### 4. **Plano de Ação Sugerido (Rápido)**
-1. **Roteiro Preventivo de Termografia**: Executar varredura de aquecimento nas injetoras com relatos de anomalias no bico ou molde.
-2. **Buffer Dinâmico de Logística**: Estabelecer um buffer de embalagens ou insumos próximo às injetoras mais solicitadas para dar agilidade aos operadores.
-3. **Auditoria de Processo (Checklist)**: Reforçar o checklist de partida de turno para mitigar falhas recorrentes antes de iniciar a injeção.`;
-
-      res.json({ analise: fallbackText });
+    try {
+      await saveTurnos(turnos);
+      res.json({ success: true, turnos });
+    } catch (err: any) {
+      console.error("Erro no POST /api/turnos:", err);
+      res.status(500).json({ error: err.message });
     }
   });
 

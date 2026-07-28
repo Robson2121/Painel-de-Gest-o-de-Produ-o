@@ -17,8 +17,9 @@ import {
   FileText
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { PedidoCarrinho, OcorrenciaLider, Usuario, Estatisticas } from "./types";
+import { PedidoCarrinho, OcorrenciaLider, Usuario, Estatisticas, Turno } from "./types";
 import { hashPassword } from "./firebase";
+import { DEFAULT_TURNOS } from "./utils/turnos";
 
 // Importação das Visões Modulares
 import LoginView from "./components/LoginView";
@@ -45,6 +46,7 @@ export default function App() {
   const [ocorrencias, setOcorrencias] = useState<OcorrenciaLider[]>([]);
   const [usuarios, setUsuarios] = useState<Usuario[]>(INITIAL_USUARIOS);
   const [ipsBloqueados, setIpsBloqueados] = useState<{ ip: string; tentatives?: number; tentativas: number }[]>([]);
+  const [turnos, setTurnos] = useState<Turno[]>(DEFAULT_TURNOS);
   const [estatisticas, setEstatisticas] = useState<Estatisticas>({
     total: 0,
     porMaquina: {},
@@ -213,17 +215,19 @@ export default function App() {
     };
 
     try {
-      const [resPedidos, resOcorrencias, resUsuarios, resIps] = await Promise.all([
+      const [resPedidos, resOcorrencias, resUsuarios, resIps, resTurnos] = await Promise.all([
         fetchSafe("/api/pedidos"),
         fetchSafe("/api/ocorrencias"),
         fetchSafe("/api/usuarios"),
-        fetchSafe("/api/ips-bloqueados")
+        fetchSafe("/api/ips-bloqueados"),
+        fetchSafe("/api/turnos")
       ]);
 
       if (resPedidos !== null) setPedidos(resPedidos);
       if (resOcorrencias !== null) setOcorrencias(resOcorrencias);
       if (resUsuarios !== null) setUsuarios(resUsuarios);
       if (resIps !== null) setIpsBloqueados(resIps);
+      if (resTurnos !== null && Array.isArray(resTurnos) && resTurnos.length > 0) setTurnos(resTurnos);
       return success;
     } catch (err) {
       // Ignora quaisquer outros erros inesperados no lote
@@ -278,12 +282,15 @@ export default function App() {
 
   // 2. Finalizar pedido de carrinho no MongoDB
   const handleFinalizarPedido = async (id: number) => {
+    // Atualização otimista imediata da interface
+    setPedidos(prev => prev.map(p => String(p.id) === String(id) || p.id === id ? { ...p, status: "FINALIZADO" } : p));
     try {
       const res = await fetch(`/api/pedidos/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Erro ao finalizar pedido");
       carregarDados();
     } catch (err) {
       console.error("Erro ao finalizar pedido:", err);
+      carregarDados();
     }
   };
 
@@ -481,6 +488,20 @@ export default function App() {
     );
   }
 
+  const handleSalvarTurnos = async (novosTurnos: Turno[]) => {
+    setTurnos(novosTurnos);
+    try {
+      await fetch("/api/turnos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ turnos: novosTurnos })
+      });
+      await carregarDados();
+    } catch (err) {
+      console.error("Erro ao salvar turnos:", err);
+    }
+  };
+
   const abasDisponiveis = getAbasDisponiveis();
 
   return (
@@ -548,7 +569,7 @@ export default function App() {
               const Icon = aba.icon;
               const ativa = abaAtiva === aba.id;
               const chamadosAtivosCount = ocorrencias.filter(o => o.status === "ATIVA").length;
-              const pedidosAtivosCount = pedidos.length;
+              const pedidosAtivosCount = pedidos.filter(p => p.status !== "FINALIZADO").length;
 
               return (
                 <button
@@ -585,52 +606,6 @@ export default function App() {
 
       {/* Área de Conteúdo Principal das Abas */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Banner de Notificação de Emergência Global para Líderes e Administradores */}
-        <AnimatePresence>
-          {notificacaoAtiva && usuarioLogado && (usuarioLogado.cargo === "LIDER" || usuarioLogado.cargo === "ADMIN") && (
-            <motion.div
-              initial={{ opacity: 0, y: -20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -20, scale: 0.95 }}
-              className="mb-6 z-40 max-w-7xl mx-auto"
-            >
-              <div className="bg-gradient-to-r from-red-600 via-red-500 to-red-600 text-white rounded-2xl p-4 shadow-2xl border border-red-500 flex flex-col md:flex-row items-center justify-between gap-4 animate-pulse">
-                <div className="flex items-center gap-3.5">
-                  <div className="bg-white text-red-600 h-10 w-10 rounded-full flex items-center justify-center font-bold text-xl shadow-md shrink-0">
-                    🚨
-                  </div>
-                  <div>
-                    <h4 className="font-black text-sm uppercase tracking-wider text-white flex items-center gap-2">
-                      CHAMADO DE EMERGÊNCIA ATIVO!
-                    </h4>
-                    <p className="text-xs text-white/95 mt-0.5">
-                      A <span className="font-black underline">Injetora {notificacaoAtiva.maquina}</span> está PARADA por: <span className="font-bold">"{notificacaoAtiva.motivo}"</span>.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 w-full md:w-auto shrink-0">
-                  <button
-                    onClick={() => {
-                      setAbaAtiva("lider");
-                      setNotificacaoAtiva(null);
-                    }}
-                    className="flex-1 md:flex-none px-4 py-2 bg-white text-red-600 hover:bg-red-50 font-black text-xs rounded-xl shadow-md transition-colors cursor-pointer text-center uppercase"
-                  >
-                    Ver no Painel
-                  </button>
-                  <button
-                    onClick={() => setNotificacaoAtiva(null)}
-                    className="px-3 py-2 bg-black/20 hover:bg-black/30 text-white/90 hover:text-white font-bold text-xs rounded-xl transition-colors cursor-pointer uppercase"
-                  >
-                    Fechar
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         <AnimatePresence mode="wait">
           <motion.div
             key={abaAtiva}
@@ -644,6 +619,7 @@ export default function App() {
                 pedidos={pedidos}
                 ocorrencias={ocorrencias}
                 estatisticas={estatisticas}
+                turnos={turnos}
               />
             )}
             {abaAtiva === "operador" && (
@@ -656,7 +632,6 @@ export default function App() {
               <LogisticaView
                 pedidos={pedidos}
                 onFinalizarPedido={handleFinalizarPedido}
-                onSincronizar={handleSincronizar}
               />
             )}
             {abaAtiva === "lider" && (
@@ -670,6 +645,7 @@ export default function App() {
                 pedidos={pedidos}
                 ocorrencias={ocorrencias}
                 estatisticas={estatisticas}
+                turnos={turnos}
                 onZerarRelatorio={handleZerarRelatorio}
                 onLimparHistoricoLider={handleLimparHistoricoLider}
                 onSincronizar={handleSincronizar}
@@ -680,9 +656,11 @@ export default function App() {
               <AdminView
                 usuarios={usuarios}
                 ipsBloqueados={ipsBloqueados}
+                turnos={turnos}
                 onAdicionarUsuario={handleAdicionarUsuario}
                 onExcluirUsuario={handleExcluirUsuario}
                 onDesbloquearIp={handleDesbloquearIp}
+                onSalvarTurnos={handleSalvarTurnos}
                 usuarioLogado={usuarioLogado}
               />
             )}
