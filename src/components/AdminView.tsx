@@ -37,17 +37,21 @@ export default function AdminView({
 
   // Estado dos turnos
   const [listaTurnos, setListaTurnos] = useState<Turno[]>([]);
+  const [modificado, setModificado] = useState(false);
   const [statusTurno, setStatusTurno] = useState("");
   const [erroTurno, setErroTurno] = useState("");
   const [salvandoTurnos, setSalvandoTurnos] = useState(false);
 
   useEffect(() => {
-    if (turnos && turnos.length > 0) {
-      setListaTurnos(turnos);
-    } else {
-      setListaTurnos(DEFAULT_TURNOS);
+    // Sincroniza com os turnos do servidor somente se não houver edição pendente do usuário
+    if (!modificado) {
+      if (turnos && turnos.length > 0) {
+        setListaTurnos(turnos);
+      } else {
+        setListaTurnos(DEFAULT_TURNOS);
+      }
     }
-  }, [turnos]);
+  }, [turnos, modificado]);
 
   const turnoAtivoAgora = obterTurnoAtual(listaTurnos);
 
@@ -96,6 +100,8 @@ export default function AdminView({
     const copia = [...listaTurnos];
     copia[index] = { ...copia[index], [campo]: valor };
     setListaTurnos(copia);
+    setModificado(true);
+    setStatusTurno("");
   };
 
   const handleAdicionarTurno = () => {
@@ -108,6 +114,8 @@ export default function AdminView({
       termino: "16:00"
     };
     setListaTurnos([...listaTurnos, novo]);
+    setModificado(true);
+    setStatusTurno("");
   };
 
   const handleRemoverTurno = (id: string) => {
@@ -116,10 +124,14 @@ export default function AdminView({
       return;
     }
     setListaTurnos(listaTurnos.filter(t => t.id !== id));
+    setModificado(true);
+    setStatusTurno("");
   };
 
   const handleRestaurarPadraoTurnos = () => {
     setListaTurnos(DEFAULT_TURNOS);
+    setModificado(true);
+    setStatusTurno("");
   };
 
   const handleSalvarTodosTurnos = async () => {
@@ -129,6 +141,7 @@ export default function AdminView({
 
     try {
       await onSalvarTurnos(listaTurnos);
+      setModificado(false);
       setStatusTurno("✅ Configuração de turnos salva e aplicada com sucesso!");
       setTimeout(() => setStatusTurno(""), 4000);
     } catch (e: any) {
@@ -147,6 +160,11 @@ export default function AdminView({
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
               <Clock className="h-5.5 w-5.5 text-amber-400" />
               Configuração de Turnos Operacionais
+              {modificado && (
+                <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-extrabold animate-pulse">
+                  Alteraçoes pendentes
+                </span>
+              )}
             </h3>
             <p className="text-slate-400 text-xs mt-0.5">
               Defina os horários de início e término dos turnos de produção para diferenciar os relatórios e métricas da Dashboard.
@@ -202,7 +220,7 @@ export default function AdminView({
                     type="time"
                     value={t.inicio}
                     onChange={(e) => handleAlterarCampoTurno(index, "inicio", e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm font-mono font-bold"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm font-mono font-bold [color-scheme:dark]"
                   />
                 </div>
 
@@ -214,7 +232,7 @@ export default function AdminView({
                     type="time"
                     value={t.termino}
                     onChange={(e) => handleAlterarCampoTurno(index, "termino", e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm font-mono font-bold"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm font-mono font-bold [color-scheme:dark]"
                   />
                 </div>
 

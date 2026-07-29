@@ -227,7 +227,9 @@ export default function App() {
       if (resOcorrencias !== null) setOcorrencias(resOcorrencias);
       if (resUsuarios !== null) setUsuarios(resUsuarios);
       if (resIps !== null) setIpsBloqueados(resIps);
-      if (resTurnos !== null && Array.isArray(resTurnos) && resTurnos.length > 0) setTurnos(resTurnos);
+      if (resTurnos !== null && Array.isArray(resTurnos) && resTurnos.length > 0) {
+        setTurnos(prev => JSON.stringify(prev) === JSON.stringify(resTurnos) ? prev : resTurnos);
+      }
       return success;
     } catch (err) {
       // Ignora quaisquer outros erros inesperados no lote
