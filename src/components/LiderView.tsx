@@ -265,23 +265,28 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
     <div className="space-y-6" id="lider-view">
       {/* Banner Superior Pulsante de Emergência Ativa */}
       {alarmeAtivo && (
-        <div className={`p-6 rounded-2xl border-2 flex flex-col md:flex-row items-center justify-between gap-4 transition-all duration-500 ${
-          silenciado 
-            ? "bg-slate-800/80 border-slate-700" 
-            : "bg-red-950/40 border-red-500 shadow-lg shadow-red-500/20 animate-pulse"
-        }`}>
+        <div 
+          key="banner-emergencia-lider"
+          className={`p-6 rounded-2xl border-2 flex flex-col md:flex-row items-center justify-between gap-4 transition-all duration-500 ${
+            silenciado 
+              ? "bg-slate-800/80 border-slate-700" 
+              : "bg-red-950/40 border-red-500 shadow-lg shadow-red-500/20 animate-pulse"
+          }`}
+        >
           <div className="flex items-center gap-4 text-center md:text-left flex-col md:flex-row">
             <div className={`p-4 rounded-full ${silenciado ? "bg-slate-700 text-slate-400" : "bg-red-500 text-white animate-bounce"}`}>
               <AlertOctagon className="h-8 w-8" />
             </div>
             <div>
               <h4 className="text-white font-black text-lg uppercase tracking-wider">
-                {silenciado ? "🚨 Alarme Silenciado" : "🚨 ATENÇÃO: SIRENE ATIVA!"}
+                <span>{silenciado ? "🚨 Alarme Silenciado" : "🚨 ATENÇÃO: SIRENE ATIVA!"}</span>
               </h4>
               <p className="text-xs text-slate-300 mt-1 max-w-md">
-                {silenciado 
-                  ? "A sirene foi pausada, mas as máquinas continuam paradas. O tempo de resposta está correndo." 
-                  : "Há máquinas industriais com paradas de emergência em andamento! O celular está vibrando e a sirene soando."}
+                <span>
+                  {silenciado 
+                    ? "A sirene foi pausada, mas as máquinas continuam paradas. O tempo de resposta está correndo." 
+                    : "Há máquinas industriais com paradas de emergência em andamento! O celular está vibrando e a sirene soando."}
+                </span>
               </p>
             </div>
           </div>
@@ -289,24 +294,27 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
           <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-center">
             {precisaInteracao && !silenciado && (
               <button
+                key="btn-interacao"
                 onClick={handleAtivarSomEInteragir}
                 className="px-5 py-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs uppercase rounded-xl shadow-lg shadow-amber-500/20 cursor-pointer animate-bounce flex items-center gap-2"
               >
                 <Volume2 className="h-4 w-4" />
-                Ativar Som & Vibração
+                <span>Ativar Som & Vibração</span>
               </button>
             )}
 
             {!silenciado ? (
               <button
+                key="btn-silenciar"
                 onClick={() => setSilenciado(true)}
                 className="px-5 py-3 bg-red-600 hover:bg-red-700 text-white font-black text-xs uppercase rounded-xl shadow-lg shadow-red-600/30 cursor-pointer flex items-center gap-2"
               >
                 <VolumeX className="h-4 w-4" />
-                Silenciar Alarme Atual
+                <span>Silenciar Alarme Atual</span>
               </button>
             ) : (
               <button
+                key="btn-reativar"
                 onClick={() => {
                   setSilenciado(false);
                   handleAtivarSomEInteragir();
@@ -314,7 +322,7 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
                 className="px-5 py-3 bg-slate-700 hover:bg-slate-600 text-white font-black text-xs uppercase rounded-xl cursor-pointer flex items-center gap-2"
               >
                 <Volume2 className="h-4 w-4" />
-                Reativar Alarme
+                <span>Reativar Alarme</span>
               </button>
             )}
           </div>
@@ -332,6 +340,7 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
         </div>
 
         <button
+          key={sireneHabilitada ? "sirene-on" : "sirene-off"}
           onClick={() => setSireneAtiva(!sireneHabilitada)}
           className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs border transition-colors cursor-pointer ${
             sireneHabilitada
@@ -340,15 +349,15 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
           }`}
         >
           {sireneHabilitada ? (
-            <>
+            <span key="span-sirene-on" className="flex items-center gap-2">
               <Volume2 className="h-4.5 w-4.5 animate-pulse" />
-              Sirene Habilitada (Auto-Alarme)
-            </>
+              <span>Sirene Habilitada (Auto-Alarme)</span>
+            </span>
           ) : (
-            <>
+            <span key="span-sirene-off" className="flex items-center gap-2">
               <VolumeX className="h-4.5 w-4.5 text-slate-500" />
-              Sirene Desabilitada
-            </>
+              <span>Sirene Desabilitada</span>
+            </span>
           )}
         </button>
       </div>
