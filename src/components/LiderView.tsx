@@ -189,19 +189,34 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
       }
     }
     if (o.id) {
-      if (typeof o.id === "number" && !isNaN(o.id) && o.id > 0) {
+      if (typeof o.id === "number" && !isNaN(o.id) && o.id > 1600000000000) {
         return o.id;
       }
       if (typeof o.id === "string") {
         if (/^\d+$/.test(o.id)) {
           const parsed = parseInt(o.id, 10);
-          if (!isNaN(parsed) && parsed > 0) return parsed;
+          if (!isNaN(parsed) && parsed > 1600000000000) return parsed;
         }
         const parsedDate = Date.parse(o.id);
         if (!isNaN(parsedDate) && parsedDate > 0) return parsedDate;
       }
     }
-    return Date.now() - serverOffset;
+    if (o.data) {
+      const parsedDate = Date.parse(o.data);
+      if (!isNaN(parsedDate) && parsedDate > 0) return parsedDate;
+      const today = new Date();
+      const parts = String(o.data).trim().split(":");
+      if (parts.length >= 2) {
+        const hours = parseInt(parts[0], 10);
+        const minutes = parseInt(parts[1], 10);
+        const seconds = parts[2] ? parseInt(parts[2], 10) : 0;
+        if (!isNaN(hours) && !isNaN(minutes)) {
+          today.setHours(hours, minutes, seconds, 0);
+          return today.getTime();
+        }
+      }
+    }
+    return currentTime - (Math.abs(serverOffset) < 3600000 ? serverOffset : 0);
   };
 
   // Efeito do cronômetro progressivo das paradas ativas

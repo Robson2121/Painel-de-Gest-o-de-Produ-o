@@ -371,12 +371,27 @@ async function getPedidos(): Promise<PedidoCarrinho[]> {
           safeId = Number(safeId);
         }
 
+        let safeTimestamp: number;
+        if (rest.timestamp && !isNaN(Number(rest.timestamp)) && Number(rest.timestamp) > 0) {
+          safeTimestamp = Number(rest.timestamp);
+        } else if (typeof safeId === "number" && safeId > 1600000000000) {
+          safeTimestamp = safeId;
+        } else if (typeof safeId === "string" && !isNaN(Number(safeId)) && Number(safeId) > 1600000000000) {
+          safeTimestamp = Number(safeId);
+        } else {
+          safeTimestamp = Date.now() - (idx * 1000);
+        }
+
+        if (rest.timestamp !== safeTimestamp) {
+          await mongoDb.collection("pedidos").updateOne({ _id: p._id }, { $set: { timestamp: safeTimestamp } }).catch(() => {});
+        }
+
         sanitized.push({
           id: safeId,
           maquina: rest.maquina || "Desconhecida",
           pedido: rest.pedido || "Carrinho / Ganchos",
-          data: rest.data || new Date().toLocaleString("pt-BR"),
-          timestamp: rest.timestamp || Date.now(),
+          data: rest.data || new Date(safeTimestamp).toLocaleString("pt-BR"),
+          timestamp: safeTimestamp,
           status: rest.status === "FINALIZADO" ? "FINALIZADO" : "ATIVO"
         } as PedidoCarrinho);
       }
@@ -385,17 +400,39 @@ async function getPedidos(): Promise<PedidoCarrinho[]> {
       console.error("Erro ao ler pedidos no MongoDB, usando cache local:", e);
     }
   }
+
+  // Sanitize local database pedidos
+  localDatabase.pedidos.forEach((p) => {
+    if (!p.timestamp || isNaN(Number(p.timestamp)) || Number(p.timestamp) <= 0) {
+      if (typeof p.id === "number" && p.id > 1600000000000) {
+        p.timestamp = p.id;
+      } else if (typeof p.id === "string" && !isNaN(Number(p.id)) && Number(p.id) > 1600000000000) {
+        p.timestamp = Number(p.id);
+      }
+    }
+  });
+
   return localDatabase.pedidos;
 }
 
 async function addPedido(pedido: PedidoCarrinho): Promise<void> {
-  const safeId = pedido.id && !isNaN(Number(pedido.id)) ? Number(pedido.id) : (typeof pedido.id === "string" && pedido.id ? pedido.id : Date.now());
-  const safePedido: PedidoCarrinho = {
+  let safeTimestamp: number;
+  if (pedido.timestamp && !isNaN(Number(pedido.timestamp)) && Number(pedido.timestamp) > 0) {
+    safeTimestamp = Number(pedido.timestamp);
+  } else if (pedido.id && !isNaN(Number(pedido.id)) && Number(pedido.id) > 1600000000000) {
+    safeTimestamp = Number(pedido.id);
+  } else {
+    safeTimestamp = Date.now();
+  }
+
+  const safeId = pedido.id && !isNaN(Number(pedido.id)) ? Number(pedido.id) : (typeof pedido.id === "string" && pedido.id ? pedido.id : safeTimestamp);
+
+  let safePedido: PedidoCarrinho = {
     id: safeId,
     maquina: pedido.maquina || "Desconhecida",
     pedido: pedido.pedido || "Carrinho / Ganchos",
-    data: pedido.data || new Date().toLocaleString("pt-BR"),
-    timestamp: pedido.timestamp || Date.now(),
+    data: pedido.data || new Date(safeTimestamp).toLocaleString("pt-BR"),
+    timestamp: safeTimestamp,
     status: pedido.status || "ATIVO"
   };
 
@@ -411,6 +448,11 @@ async function addPedido(pedido: PedidoCarrinho): Promise<void> {
       });
 
       if (existing) {
+        if (existing.timestamp && !isNaN(Number(existing.timestamp)) && Number(existing.timestamp) > 0) {
+          safePedido.timestamp = Number(existing.timestamp);
+        } else if (existing.id && !isNaN(Number(existing.id)) && Number(existing.id) > 1600000000000) {
+          safePedido.timestamp = Number(existing.id);
+        }
         await mongoDb.collection("pedidos").updateOne(
           { _id: existing._id },
           { $set: safePedido }
@@ -429,6 +471,9 @@ async function addPedido(pedido: PedidoCarrinho): Promise<void> {
     (p.maquina === safePedido.maquina && p.pedido === safePedido.pedido && p.status === "ATIVO")
   );
   if (idx !== -1) {
+    if (localDatabase.pedidos[idx].timestamp && !isNaN(Number(localDatabase.pedidos[idx].timestamp)) && Number(localDatabase.pedidos[idx].timestamp) > 0) {
+      safePedido.timestamp = Number(localDatabase.pedidos[idx].timestamp);
+    }
     localDatabase.pedidos[idx] = safePedido;
   } else {
     localDatabase.pedidos.push(safePedido);
@@ -511,12 +556,27 @@ async function getOcorrencias(): Promise<OcorrenciaLider[]> {
           safeId = Number(safeId);
         }
 
+        let safeTimestamp: number;
+        if (rest.timestamp && !isNaN(Number(rest.timestamp)) && Number(rest.timestamp) > 0) {
+          safeTimestamp = Number(rest.timestamp);
+        } else if (typeof safeId === "number" && safeId > 1600000000000) {
+          safeTimestamp = safeId;
+        } else if (typeof safeId === "string" && !isNaN(Number(safeId)) && Number(safeId) > 1600000000000) {
+          safeTimestamp = Number(safeId);
+        } else {
+          safeTimestamp = Date.now() - (idx * 1000);
+        }
+
+        if (rest.timestamp !== safeTimestamp) {
+          await mongoDb.collection("ocorrencias").updateOne({ _id: o._id }, { $set: { timestamp: safeTimestamp } }).catch(() => {});
+        }
+
         sanitized.push({
           id: safeId,
           maquina: rest.maquina || "Desconhecida",
           motivo: rest.motivo || "Parada Operacional",
-          data: rest.data || new Date().toLocaleTimeString("pt-BR"),
-          timestamp: rest.timestamp || Date.now(),
+          data: rest.data || new Date(safeTimestamp).toLocaleTimeString("pt-BR"),
+          timestamp: safeTimestamp,
           status: rest.status === "RESOLVIDA" ? "RESOLVIDA" : "ATIVA",
           tempoResposta: rest.tempoResposta || undefined
         } as OcorrenciaLider);
@@ -526,17 +586,38 @@ async function getOcorrencias(): Promise<OcorrenciaLider[]> {
       console.error("Erro ao ler ocorrências no MongoDB, usando cache local:", e);
     }
   }
+
+  localDatabase.ocorrencias.forEach((o) => {
+    if (!o.timestamp || isNaN(Number(o.timestamp)) || Number(o.timestamp) <= 0) {
+      if (typeof o.id === "number" && o.id > 1600000000000) {
+        o.timestamp = o.id;
+      } else if (typeof o.id === "string" && !isNaN(Number(o.id)) && Number(o.id) > 1600000000000) {
+        o.timestamp = Number(o.id);
+      }
+    }
+  });
+
   return localDatabase.ocorrencias;
 }
 
 async function addOcorrencia(ocorrencia: OcorrenciaLider): Promise<void> {
-  const safeId = ocorrencia.id && !isNaN(Number(ocorrencia.id)) ? Number(ocorrencia.id) : (typeof ocorrencia.id === "string" && ocorrencia.id ? ocorrencia.id : Date.now());
-  const safeNova: OcorrenciaLider = {
+  let safeTimestamp: number;
+  if (ocorrencia.timestamp && !isNaN(Number(ocorrencia.timestamp)) && Number(ocorrencia.timestamp) > 0) {
+    safeTimestamp = Number(ocorrencia.timestamp);
+  } else if (ocorrencia.id && !isNaN(Number(ocorrencia.id)) && Number(ocorrencia.id) > 1600000000000) {
+    safeTimestamp = Number(ocorrencia.id);
+  } else {
+    safeTimestamp = Date.now();
+  }
+
+  const safeId = ocorrencia.id && !isNaN(Number(ocorrencia.id)) ? Number(ocorrencia.id) : (typeof ocorrencia.id === "string" && ocorrencia.id ? ocorrencia.id : safeTimestamp);
+
+  let safeNova: OcorrenciaLider = {
     id: safeId,
     maquina: ocorrencia.maquina || "Desconhecida",
     motivo: ocorrencia.motivo || "Parada Operacional",
-    data: ocorrencia.data || new Date().toLocaleTimeString("pt-BR"),
-    timestamp: ocorrencia.timestamp || Date.now(),
+    data: ocorrencia.data || new Date(safeTimestamp).toLocaleTimeString("pt-BR"),
+    timestamp: safeTimestamp,
     status: ocorrencia.status || "ATIVA",
     tempoResposta: ocorrencia.tempoResposta || undefined
   };
@@ -553,6 +634,11 @@ async function addOcorrencia(ocorrencia: OcorrenciaLider): Promise<void> {
       });
 
       if (existing) {
+        if (existing.timestamp && !isNaN(Number(existing.timestamp)) && Number(existing.timestamp) > 0) {
+          safeNova.timestamp = Number(existing.timestamp);
+        } else if (existing.id && !isNaN(Number(existing.id)) && Number(existing.id) > 1600000000000) {
+          safeNova.timestamp = Number(existing.id);
+        }
         await mongoDb.collection("ocorrencias").updateOne(
           { _id: existing._id },
           { $set: safeNova }
@@ -571,6 +657,9 @@ async function addOcorrencia(ocorrencia: OcorrenciaLider): Promise<void> {
     (o.maquina === safeNova.maquina && o.motivo === safeNova.motivo && o.status === "ATIVA")
   );
   if (idx !== -1) {
+    if (localDatabase.ocorrencias[idx].timestamp && !isNaN(Number(localDatabase.ocorrencias[idx].timestamp)) && Number(localDatabase.ocorrencias[idx].timestamp) > 0) {
+      safeNova.timestamp = Number(localDatabase.ocorrencias[idx].timestamp);
+    }
     localDatabase.ocorrencias[idx] = safeNova;
   } else {
     localDatabase.ocorrencias.push(safeNova);
@@ -825,18 +914,20 @@ async function startServer() {
   });
 
   app.post("/api/pedidos", async (req, res) => {
-    const { maquina, pedido } = req.body;
+    const { maquina, pedido, id, timestamp, data } = req.body;
     if (!maquina || !pedido) {
       return res.status(400).json({ error: "Máquina e pedido são obrigatórios" });
     }
 
-    const id = Date.now();
+    const safeTimestamp = timestamp && !isNaN(Number(timestamp)) && Number(timestamp) > 0 ? Number(timestamp) : Date.now();
+    const safeId = id ? (isNaN(Number(id)) ? id : Number(id)) : safeTimestamp;
+
     const novo: PedidoCarrinho = {
-      id,
+      id: safeId,
       maquina,
       pedido,
-      data: new Date().toLocaleString("pt-BR"),
-      timestamp: Date.now(),
+      data: data || new Date(safeTimestamp).toLocaleString("pt-BR"),
+      timestamp: safeTimestamp,
       status: "ATIVO"
     };
 
@@ -873,18 +964,20 @@ async function startServer() {
   });
 
   app.post("/api/ocorrencias", async (req, res) => {
-    const { maquina, motivo, data, status, tempoResposta } = req.body;
+    const { maquina, motivo, data, status, tempoResposta, id, timestamp } = req.body;
     if (!maquina || !motivo) {
       return res.status(400).json({ error: "Máquina e motivo são obrigatórios" });
     }
 
-    const id = Date.now();
+    const safeTimestamp = timestamp && !isNaN(Number(timestamp)) && Number(timestamp) > 0 ? Number(timestamp) : Date.now();
+    const safeId = id ? (isNaN(Number(id)) ? id : Number(id)) : safeTimestamp;
+
     const nova: OcorrenciaLider = {
-      id,
+      id: safeId,
       maquina,
       motivo,
-      data: data || new Date().toLocaleTimeString("pt-BR"),
-      timestamp: Date.now(),
+      data: data || new Date(safeTimestamp).toLocaleTimeString("pt-BR"),
+      timestamp: safeTimestamp,
       status: status || "ATIVA",
       tempoResposta: tempoResposta || undefined
     };

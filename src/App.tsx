@@ -421,12 +421,13 @@ export default function App() {
 
   // 1. Cadastrar pedido de carrinho no MongoDB / Fallback Offline
   const handleAdicionarPedido = async (maquina: string, pedido: string) => {
+    const now = Date.now();
     const novoPedido: PedidoCarrinho = {
-      id: Date.now(),
+      id: now,
       maquina,
       pedido,
-      data: new Date().toLocaleString("pt-BR"),
-      timestamp: Date.now(),
+      data: new Date(now).toLocaleString("pt-BR"),
+      timestamp: now,
       status: "ATIVO"
     };
 
@@ -434,7 +435,7 @@ export default function App() {
       const res = await fetch("/api/pedidos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ maquina, pedido })
+        body: JSON.stringify(novoPedido)
       });
       if (!res.ok) throw new Error("Servidor indisponível");
       carregarDados();
@@ -492,12 +493,13 @@ export default function App() {
 
   // 3. Cadastrar ocorrência de máquina parada no MongoDB / Fallback Offline
   const handleAdicionarOcorrencia = async (maquina: string, motivo: string) => {
+    const now = Date.now();
     const novaOcorrencia: OcorrenciaLider = {
-      id: Date.now(),
+      id: now,
       maquina,
       motivo,
-      data: new Date().toLocaleTimeString("pt-BR"),
-      timestamp: Date.now(),
+      data: new Date(now).toLocaleTimeString("pt-BR"),
+      timestamp: now,
       status: "ATIVA"
     };
 
@@ -505,7 +507,7 @@ export default function App() {
       const res = await fetch("/api/ocorrencias", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ maquina, motivo })
+        body: JSON.stringify(novaOcorrencia)
       });
       if (!res.ok) throw new Error("Servidor indisponível");
       carregarDados();

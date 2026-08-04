@@ -63,19 +63,34 @@ export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaV
       }
     }
     if (p.id) {
-      if (typeof p.id === "number" && !isNaN(p.id) && p.id > 0) {
+      if (typeof p.id === "number" && !isNaN(p.id) && p.id > 1600000000000) {
         return p.id;
       }
       if (typeof p.id === "string") {
         if (/^\d+$/.test(p.id)) {
           const parsed = parseInt(p.id, 10);
-          if (!isNaN(parsed) && parsed > 0) return parsed;
+          if (!isNaN(parsed) && parsed > 1600000000000) return parsed;
         }
         const parsedDate = Date.parse(p.id);
         if (!isNaN(parsedDate) && parsedDate > 0) return parsedDate;
       }
     }
-    return Date.now() - serverOffset;
+    if (p.data) {
+      const parsedDate = Date.parse(p.data);
+      if (!isNaN(parsedDate) && parsedDate > 0) return parsedDate;
+      const today = new Date();
+      const parts = String(p.data).trim().split(":");
+      if (parts.length >= 2) {
+        const hours = parseInt(parts[0], 10);
+        const minutes = parseInt(parts[1], 10);
+        const seconds = parts[2] ? parseInt(parts[2], 10) : 0;
+        if (!isNaN(hours) && !isNaN(minutes)) {
+          today.setHours(hours, minutes, seconds, 0);
+          return today.getTime();
+        }
+      }
+    }
+    return currentTime - (Math.abs(serverOffset) < 3600000 ? serverOffset : 0);
   };
 
   const formatarTempo = (segundosTotais: number) => {
