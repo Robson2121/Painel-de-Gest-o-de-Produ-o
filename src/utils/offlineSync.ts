@@ -24,6 +24,52 @@ export interface CachedState {
 const CACHE_KEY = "industrial_state_cache_v1";
 const QUEUE_KEY = "industrial_offline_queue_v1";
 const HISTORY_KEY = "industrial_sync_history_v1";
+const FINALIZED_IDS_KEY = "industrial_finalized_ids_v1";
+const RESOLVED_IDS_KEY = "industrial_resolved_ids_v1";
+
+export function getFinalizedLocalIds(): string[] {
+  try {
+    const raw = localStorage.getItem(FINALIZED_IDS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function addFinalizedLocalId(id: string | number): void {
+  try {
+    const current = getFinalizedLocalIds();
+    const strId = String(id);
+    if (!current.includes(strId)) {
+      current.push(strId);
+      localStorage.setItem(FINALIZED_IDS_KEY, JSON.stringify(current));
+    }
+  } catch (e) {
+    console.error("Erro ao salvar ID finalizado local:", e);
+  }
+}
+
+export function getResolvedLocalIds(): string[] {
+  try {
+    const raw = localStorage.getItem(RESOLVED_IDS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function addResolvedLocalId(id: string | number): void {
+  try {
+    const current = getResolvedLocalIds();
+    const strId = String(id);
+    if (!current.includes(strId)) {
+      current.push(strId);
+      localStorage.setItem(RESOLVED_IDS_KEY, JSON.stringify(current));
+    }
+  } catch (e) {
+    console.error("Erro ao salvar ID resolvido local:", e);
+  }
+}
 
 export function getSyncHistory(): SyncHistoryItem[] {
   try {

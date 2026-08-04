@@ -9,7 +9,7 @@ import { PedidoCarrinho } from "../types";
 
 interface LogisticaViewProps {
   pedidos: PedidoCarrinho[];
-  onFinalizarPedido: (id: number) => Promise<void>;
+  onFinalizarPedido: (id: number | string) => Promise<void>;
   onSincronizar?: () => Promise<void>;
 }
 
@@ -125,7 +125,7 @@ export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaV
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {pedidosAtivos.map(p => {
+          {pedidosAtivos.map((p, index) => {
             const ts = obterTimestampSeguro(p);
             const segundos = Math.max(0, Math.floor((currentTime - serverOffset - ts) / 1000));
             const urgenciaAlta = segundos > 180;
@@ -133,7 +133,7 @@ export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaV
 
             return (
               <div
-                key={p.id}
+                key={p.id ? `${p.id}-${index}` : `pedido-${index}`}
                 className={`bg-slate-800 border rounded-2xl p-5 flex flex-col justify-between gap-5 transition-all duration-300 relative overflow-hidden ${
                   urgenciaAlta
                     ? "border-red-500 shadow-lg shadow-red-500/5 animate-pulse"
@@ -190,7 +190,12 @@ export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaV
 
                 <div className="pl-3 flex gap-2">
                   <button
-                    onClick={() => onFinalizarPedido(p.id)}
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onFinalizarPedido(p.id ?? p.timestamp ?? index);
+                    }}
                     className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 hover:shadow-emerald-500/10 text-white font-extrabold rounded-xl shadow-md cursor-pointer transition-all flex items-center justify-center gap-2 text-sm"
                   >
                     <Check className="h-4.5 w-4.5" />

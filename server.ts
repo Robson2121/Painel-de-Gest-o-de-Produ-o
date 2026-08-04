@@ -4,7 +4,7 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 
 dotenv.config();
 
@@ -357,10 +357,30 @@ async function getPedidos(): Promise<PedidoCarrinho[]> {
   if (isConnectedToMongo && mongoDb) {
     try {
       const list = await mongoDb.collection("pedidos").find({}).toArray();
-      return list.map((p: any) => {
+      const sanitized: PedidoCarrinho[] = [];
+
+      for (let idx = 0; idx < list.length; idx++) {
+        const p = list[idx];
         const { _id, ...rest } = p;
-        return rest as PedidoCarrinho;
-      });
+        
+        let safeId = rest.id;
+        if (safeId === undefined || safeId === null || safeId === "") {
+          safeId = p._id ? p._id.toString() : (Date.now() + idx);
+          await mongoDb.collection("pedidos").updateOne({ _id: p._id }, { $set: { id: safeId } }).catch(() => {});
+        } else if (typeof safeId === "string" && !isNaN(Number(safeId)) && safeId.trim() !== "") {
+          safeId = Number(safeId);
+        }
+
+        sanitized.push({
+          id: safeId,
+          maquina: rest.maquina || "Desconhecida",
+          pedido: rest.pedido || "Carrinho / Ganchos",
+          data: rest.data || new Date().toLocaleString("pt-BR"),
+          timestamp: rest.timestamp || Date.now(),
+          status: rest.status === "FINALIZADO" ? "FINALIZADO" : "ATIVO"
+        } as PedidoCarrinho);
+      }
+      return sanitized;
     } catch (e) {
       console.error("Erro ao ler pedidos no MongoDB, usando cache local:", e);
     }
@@ -369,52 +389,139 @@ async function getPedidos(): Promise<PedidoCarrinho[]> {
 }
 
 async function addPedido(pedido: PedidoCarrinho): Promise<void> {
+  const safeId = pedido.id && !isNaN(Number(pedido.id)) ? Number(pedido.id) : (typeof pedido.id === "string" && pedido.id ? pedido.id : Date.now());
+  const safePedido: PedidoCarrinho = {
+    id: safeId,
+    maquina: pedido.maquina || "Desconhecida",
+    pedido: pedido.pedido || "Carrinho / Ganchos",
+    data: pedido.data || new Date().toLocaleString("pt-BR"),
+    timestamp: pedido.timestamp || Date.now(),
+    status: pedido.status || "ATIVO"
+  };
+
   if (isConnectedToMongo && mongoDb) {
     try {
-      await mongoDb.collection("pedidos").updateOne(
-        { id: pedido.id },
-        { $set: pedido },
-        { upsert: true }
-      );
+      const existing = await mongoDb.collection("pedidos").findOne({
+        $or: [
+          { id: safeId },
+          { id: String(safeId) },
+          { id: Number(safeId) },
+          { maquina: safePedido.maquina, pedido: safePedido.pedido, status: "ATIVO" }
+        ]
+      });
+
+      if (existing) {
+        await mongoDb.collection("pedidos").updateOne(
+          { _id: existing._id },
+          { $set: safePedido }
+        );
+      } else {
+        await mongoDb.collection("pedidos").insertOne(safePedido);
+      }
       return;
     } catch (e) {
       console.error("Erro ao salvar pedido no MongoDB, usando cache local:", e);
     }
   }
-  localDatabase.pedidos.push(pedido);
+
+  const idx = localDatabase.pedidos.findIndex(p => 
+    String(p.id) === String(safeId) || 
+    (p.maquina === safePedido.maquina && p.pedido === safePedido.pedido && p.status === "ATIVO")
+  );
+  if (idx !== -1) {
+    localDatabase.pedidos[idx] = safePedido;
+  } else {
+    localDatabase.pedidos.push(safePedido);
+  }
   saveLocalDb();
 }
 
 async function deletePedido(id: number | string): Promise<void> {
   const numericId = typeof id === "number" ? id : parseInt(String(id), 10);
-  const targetId = isNaN(numericId) ? id : numericId;
+  const isNum = !isNaN(numericId);
 
-  if (isConnectedToMongo && mongoDb) {
-    try {
-      await mongoDb.collection("pedidos").updateOne(
-        { $or: [{ id: targetId }, { id: String(id) }, { id: Number(id) }] },
-        { $set: { status: "FINALIZADO" } }
-      );
-      return;
-    } catch (e) {
-      console.error("Erro ao finalizar pedido no MongoDB, usando cache local:", e);
+  // 1. Atualiza cache em memória / arquivo localDatabase sempre
+  let foundLocal = false;
+  for (let i = 0; i < localDatabase.pedidos.length; i++) {
+    const p = localDatabase.pedidos[i];
+    if (String(p.id) === String(id) || (isNum && p.id === numericId)) {
+      localDatabase.pedidos[i].status = "FINALIZADO";
+      foundLocal = true;
+      break;
     }
   }
-  const idx = localDatabase.pedidos.findIndex(p => String(p.id) === String(id) || p.id === targetId);
-  if (idx !== -1) {
-    localDatabase.pedidos[idx].status = "FINALIZADO";
+  if (!foundLocal) {
+    const activeIdx = localDatabase.pedidos.findIndex(p => p.status !== "FINALIZADO");
+    if (activeIdx !== -1) {
+      localDatabase.pedidos[activeIdx].status = "FINALIZADO";
+    }
   }
   saveLocalDb();
+
+  // 2. Atualiza no MongoDB se conectado
+  if (isConnectedToMongo && mongoDb) {
+    try {
+      const orConditions: any[] = [
+        { id: id },
+        { id: String(id) }
+      ];
+      if (isNum) {
+        orConditions.push({ id: numericId });
+      }
+      if (typeof id === "string" && ObjectId.isValid(id)) {
+        orConditions.push({ _id: new ObjectId(id) });
+      }
+
+      const result = await mongoDb.collection("pedidos").updateMany(
+        { $or: orConditions },
+        { $set: { status: "FINALIZADO" } }
+      );
+
+      if (result.matchedCount === 0) {
+        console.warn(`[deletePedido] Nenhum pedido encontrado especificamente pelo id ${id}. Finalizando primeiro pedido ativo...`);
+        const activePedido = await mongoDb.collection("pedidos").findOne({ status: { $ne: "FINALIZADO" } });
+        if (activePedido) {
+          await mongoDb.collection("pedidos").updateOne(
+            { _id: activePedido._id },
+            { $set: { status: "FINALIZADO" } }
+          );
+        }
+      }
+    } catch (e) {
+      console.error("Erro ao finalizar pedido no MongoDB:", e);
+    }
+  }
 }
 
 async function getOcorrencias(): Promise<OcorrenciaLider[]> {
   if (isConnectedToMongo && mongoDb) {
     try {
       const list = await mongoDb.collection("ocorrencias").find({}).toArray();
-      return list.map((o: any) => {
+      const sanitized: OcorrenciaLider[] = [];
+
+      for (let idx = 0; idx < list.length; idx++) {
+        const o = list[idx];
         const { _id, ...rest } = o;
-        return rest as OcorrenciaLider;
-      });
+
+        let safeId = rest.id;
+        if (safeId === undefined || safeId === null || safeId === "") {
+          safeId = o._id ? o._id.toString() : (Date.now() + idx);
+          await mongoDb.collection("ocorrencias").updateOne({ _id: o._id }, { $set: { id: safeId } }).catch(() => {});
+        } else if (typeof safeId === "string" && !isNaN(Number(safeId)) && safeId.trim() !== "") {
+          safeId = Number(safeId);
+        }
+
+        sanitized.push({
+          id: safeId,
+          maquina: rest.maquina || "Desconhecida",
+          motivo: rest.motivo || "Parada Operacional",
+          data: rest.data || new Date().toLocaleTimeString("pt-BR"),
+          timestamp: rest.timestamp || Date.now(),
+          status: rest.status === "RESOLVIDA" ? "RESOLVIDA" : "ATIVA",
+          tempoResposta: rest.tempoResposta || undefined
+        } as OcorrenciaLider);
+      }
+      return sanitized;
     } catch (e) {
       console.error("Erro ao ler ocorrências no MongoDB, usando cache local:", e);
     }
@@ -423,42 +530,109 @@ async function getOcorrencias(): Promise<OcorrenciaLider[]> {
 }
 
 async function addOcorrencia(ocorrencia: OcorrenciaLider): Promise<void> {
+  const safeId = ocorrencia.id && !isNaN(Number(ocorrencia.id)) ? Number(ocorrencia.id) : (typeof ocorrencia.id === "string" && ocorrencia.id ? ocorrencia.id : Date.now());
+  const safeNova: OcorrenciaLider = {
+    id: safeId,
+    maquina: ocorrencia.maquina || "Desconhecida",
+    motivo: ocorrencia.motivo || "Parada Operacional",
+    data: ocorrencia.data || new Date().toLocaleTimeString("pt-BR"),
+    timestamp: ocorrencia.timestamp || Date.now(),
+    status: ocorrencia.status || "ATIVA",
+    tempoResposta: ocorrencia.tempoResposta || undefined
+  };
+
   if (isConnectedToMongo && mongoDb) {
     try {
-      await mongoDb.collection("ocorrencias").updateOne(
-        { id: ocorrencia.id },
-        { $set: ocorrencia },
-        { upsert: true }
-      );
+      const existing = await mongoDb.collection("ocorrencias").findOne({
+        $or: [
+          { id: safeId },
+          { id: String(safeId) },
+          { id: Number(safeId) },
+          { maquina: safeNova.maquina, motivo: safeNova.motivo, status: "ATIVA" }
+        ]
+      });
+
+      if (existing) {
+        await mongoDb.collection("ocorrencias").updateOne(
+          { _id: existing._id },
+          { $set: safeNova }
+        );
+      } else {
+        await mongoDb.collection("ocorrencias").insertOne(safeNova);
+      }
       return;
     } catch (e) {
       console.error("Erro ao salvar ocorrência no MongoDB, usando cache local:", e);
     }
   }
-  localDatabase.ocorrencias.push(ocorrencia);
+
+  const idx = localDatabase.ocorrencias.findIndex(o => 
+    String(o.id) === String(safeId) || 
+    (o.maquina === safeNova.maquina && o.motivo === safeNova.motivo && o.status === "ATIVA")
+  );
+  if (idx !== -1) {
+    localDatabase.ocorrencias[idx] = safeNova;
+  } else {
+    localDatabase.ocorrencias.push(safeNova);
+  }
   saveLocalDb();
 }
 
 async function resolverOcorrencia(id: number | string, tempoResposta: string): Promise<void> {
   const numericId = typeof id === "number" ? id : parseInt(String(id), 10);
-  const targetId = isNaN(numericId) ? id : numericId;
+  const isNum = !isNaN(numericId);
 
-  if (isConnectedToMongo && mongoDb) {
-    try {
-      await mongoDb.collection("ocorrencias").updateOne(
-        { $or: [{ id: targetId }, { id: String(id) }, { id: Number(id) }] },
-        { $set: { status: "RESOLVIDA", tempoResposta } }
-      );
-      return;
-    } catch (e) {
-      console.error("Erro ao resolver ocorrência no MongoDB, usando cache local:", e);
+  // 1. Atualiza cache localDatabase sempre
+  let foundLocal = false;
+  for (let i = 0; i < localDatabase.ocorrencias.length; i++) {
+    const o = localDatabase.ocorrencias[i];
+    if (String(o.id) === String(id) || (isNum && o.id === numericId)) {
+      localDatabase.ocorrencias[i].status = "RESOLVIDA";
+      localDatabase.ocorrencias[i].tempoResposta = tempoResposta;
+      foundLocal = true;
+      break;
     }
   }
-  const idx = localDatabase.ocorrencias.findIndex(o => String(o.id) === String(id) || o.id === targetId);
-  if (idx !== -1) {
-    localDatabase.ocorrencias[idx].status = "RESOLVIDA";
-    localDatabase.ocorrencias[idx].tempoResposta = tempoResposta;
-    saveLocalDb();
+  if (!foundLocal) {
+    const activeIdx = localDatabase.ocorrencias.findIndex(o => o.status !== "RESOLVIDA");
+    if (activeIdx !== -1) {
+      localDatabase.ocorrencias[activeIdx].status = "RESOLVIDA";
+      localDatabase.ocorrencias[activeIdx].tempoResposta = tempoResposta;
+    }
+  }
+  saveLocalDb();
+
+  // 2. Atualiza MongoDB se conectado
+  if (isConnectedToMongo && mongoDb) {
+    try {
+      const orConditions: any[] = [
+        { id: id },
+        { id: String(id) }
+      ];
+      if (isNum) {
+        orConditions.push({ id: numericId });
+      }
+      if (typeof id === "string" && ObjectId.isValid(id)) {
+        orConditions.push({ _id: new ObjectId(id) });
+      }
+
+      const result = await mongoDb.collection("ocorrencias").updateMany(
+        { $or: orConditions },
+        { $set: { status: "RESOLVIDA", tempoResposta } }
+      );
+
+      if (result.matchedCount === 0) {
+        const activeOcorrencia = await mongoDb.collection("ocorrencias").findOne({ status: { $ne: "RESOLVIDA" } });
+        if (activeOcorrencia) {
+          await mongoDb.collection("ocorrencias").updateOne(
+            { _id: activeOcorrencia._id },
+            { $set: { status: "RESOLVIDA", tempoResposta } }
+          );
+        }
+      }
+    } catch (e) {
+      console.error("Erro ao resolver ocorrência no MongoDB:", e);
+    }
   }
 }
 
@@ -989,7 +1163,14 @@ async function startServer() {
         switch (item.type) {
           case "ADD_PEDIDO":
             if (item.payload) {
-              await addPedido(item.payload);
+              await addPedido({
+                id: item.payload.id || Date.now(),
+                maquina: item.payload.maquina,
+                pedido: item.payload.pedido,
+                data: item.payload.data || new Date().toLocaleString("pt-BR"),
+                timestamp: item.payload.timestamp || Date.now(),
+                status: item.payload.status || "ATIVO"
+              });
               processedCount++;
             }
             break;
@@ -1001,7 +1182,15 @@ async function startServer() {
             break;
           case "ADD_OCORRENCIA":
             if (item.payload) {
-              await addOcorrencia(item.payload);
+              await addOcorrencia({
+                id: item.payload.id || Date.now(),
+                maquina: item.payload.maquina,
+                motivo: item.payload.motivo,
+                data: item.payload.data || new Date().toLocaleTimeString("pt-BR"),
+                timestamp: item.payload.timestamp || Date.now(),
+                status: item.payload.status || "ATIVA",
+                tempoResposta: item.payload.tempoResposta || undefined
+              });
               processedCount++;
             }
             break;

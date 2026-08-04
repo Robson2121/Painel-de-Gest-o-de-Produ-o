@@ -31,7 +31,11 @@ import {
   saveCachedState,
   getOfflineQueue,
   enqueueOfflineAction,
-  processSyncQueue
+  processSyncQueue,
+  getFinalizedLocalIds,
+  addFinalizedLocalId,
+  getResolvedLocalIds,
+  addResolvedLocalId
 } from "./utils/offlineSync";
 
 // Importação das Visões Modulares
@@ -281,14 +285,54 @@ export default function App() {
       let novosIps = ipsBloqueados;
       let novosTurnos = turnos;
 
+      // Se o servidor respondeu, mescla os dados do servidor respeitando ações pendentes e finalizações locais
       if (resPedidos !== null) {
-        setPedidos(resPedidos);
-        novosPedidos = resPedidos;
+        const currentQueue = getOfflineQueue();
+        const pendingFinalizedIds = new Set([
+          ...currentQueue.filter(q => q.type === "FINALIZE_PEDIDO" && q.payload?.id).map(q => String(q.payload.id)),
+          ...getFinalizedLocalIds()
+        ]);
+        const pedidosAjustados = resPedidos.map((p: PedidoCarrinho) => 
+          pendingFinalizedIds.has(String(p.id)) ? { ...p, status: "FINALIZADO" as const } : p
+        );
+        setPedidos(pedidosAjustados);
+        novosPedidos = pedidosAjustados;
+      } else {
+        // Fallback para cache local em modo offline
+        const cached = getCachedState();
+        if (cached && cached.pedidos && cached.pedidos.length > 0) {
+          const pendingFinalizedIds = new Set(getFinalizedLocalIds());
+          const pedidosAjustados = cached.pedidos.map((p: PedidoCarrinho) =>
+            pendingFinalizedIds.has(String(p.id)) ? { ...p, status: "FINALIZADO" as const } : p
+          );
+          setPedidos(pedidosAjustados);
+          novosPedidos = pedidosAjustados;
+        }
       }
+
       if (resOcorrencias !== null) {
-        setOcorrencias(resOcorrencias);
-        novasOcorrencias = resOcorrencias;
+        const currentQueue = getOfflineQueue();
+        const pendingResolvedIds = new Set([
+          ...currentQueue.filter(q => q.type === "RESOLVE_OCORRENCIA" && q.payload?.id).map(q => String(q.payload.id)),
+          ...getResolvedLocalIds()
+        ]);
+        const ocorrenciasAjustadas = resOcorrencias.map((o: OcorrenciaLider) => 
+          pendingResolvedIds.has(String(o.id)) ? { ...o, status: "RESOLVIDA" as const } : o
+        );
+        setOcorrencias(ocorrenciasAjustadas);
+        novasOcorrencias = ocorrenciasAjustadas;
+      } else {
+        const cached = getCachedState();
+        if (cached && cached.ocorrencias && cached.ocorrencias.length > 0) {
+          const pendingResolvedIds = new Set(getResolvedLocalIds());
+          const ocorrenciasAjustadas = cached.ocorrencias.map((o: OcorrenciaLider) =>
+            pendingResolvedIds.has(String(o.id)) ? { ...o, status: "RESOLVIDA" as const } : o
+          );
+          setOcorrencias(ocorrenciasAjustadas);
+          novasOcorrencias = ocorrenciasAjustadas;
+        }
       }
+
       if (resUsuarios !== null) {
         setUsuarios(resUsuarios);
         novosUsuarios = resUsuarios;
@@ -317,6 +361,11 @@ export default function App() {
       return success;
     } catch (err) {
       setServidorConectado(false);
+      const cached = getCachedState();
+      if (cached) {
+        if (cached.pedidos) setPedidos(cached.pedidos);
+        if (cached.ocorrencias) setOcorrencias(cached.ocorrencias);
+      }
       return false;
     }
   };
@@ -391,9 +440,12 @@ export default function App() {
       carregarDados();
     } catch (err) {
       console.warn("Servidor offline ao cadastrar pedido. Salvando localmente...", err);
-      setPedidos(prev => [...prev, novoPedido]);
-      enqueueOfflineAction("ADD_PEDIDO", { maquina, pedido });
-      saveCachedState({ pedidos: [...pedidos, novoPedido] });
+      setPedidos(prev => {
+        const updated = [...prev, novoPedido];
+        saveCachedState({ pedidos: updated });
+        return updated;
+      });
+      enqueueOfflineAction("ADD_PEDIDO", novoPedido);
       setPendentesSyncCount(getOfflineQueue().length);
       setStatusSyncMsg("⚡ Conexão offline: Pedido gravado localmente. Será sincronizado automaticamente ao restabelecer o servidor.");
       setTimeout(() => setStatusSyncMsg(""), 5000);
@@ -401,9 +453,30 @@ export default function App() {
   };
 
   // 2. Finalizar pedido de carrinho no MongoDB / Fallback Offline
-  const handleFinalizarPedido = async (id: number) => {
+  const handleFinalizarPedido = async (id: number | string) => {
+    addFinalizedLocalId(id);
+
     // Atualização otimista imediata da interface
-    setPedidos(prev => prev.map(p => String(p.id) === String(id) || p.id === id ? { ...p, status: "FINALIZADO" } : p));
+    setPedidos(prev => {
+      let matched = false;
+      let updated = prev.map(p => {
+        if (String(p.id) === String(id) || p.id === id) {
+          matched = true;
+          return { ...p, status: "FINALIZADO" as const };
+        }
+        return p;
+      });
+      if (!matched) {
+        const activeIdx = updated.findIndex(p => p.status === "ATIVO");
+        if (activeIdx !== -1) {
+          addFinalizedLocalId(updated[activeIdx].id);
+          updated[activeIdx] = { ...updated[activeIdx], status: "FINALIZADO" as const };
+        }
+      }
+      saveCachedState({ pedidos: updated });
+      return updated;
+    });
+
     try {
       const res = await fetch(`/api/pedidos/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Servidor indisponível");
@@ -438,9 +511,12 @@ export default function App() {
       carregarDados();
     } catch (err) {
       console.warn("Servidor offline ao adicionar ocorrência. Salvando localmente...", err);
-      setOcorrencias(prev => [novaOcorrencia, ...prev]);
-      enqueueOfflineAction("ADD_OCORRENCIA", { maquina, motivo });
-      saveCachedState({ ocorrencias: [novaOcorrencia, ...ocorrencias] });
+      setOcorrencias(prev => {
+        const updated = [novaOcorrencia, ...prev];
+        saveCachedState({ ocorrencias: updated });
+        return updated;
+      });
+      enqueueOfflineAction("ADD_OCORRENCIA", novaOcorrencia);
       setPendentesSyncCount(getOfflineQueue().length);
       setStatusSyncMsg("🚨 Conexão offline: Chamado gravado localmente. Será enviado assim que o servidor retornar.");
       setTimeout(() => setStatusSyncMsg(""), 5000);
@@ -448,8 +524,29 @@ export default function App() {
   };
 
   // 4. Resolver ocorrência com tempo de resposta no MongoDB / Fallback Offline
-  const handleResolverOcorrencia = async (id: number, tempoResposta: string) => {
-    setOcorrencias(prev => prev.map(o => String(o.id) === String(id) || o.id === id ? { ...o, status: "RESOLVIDA", tempoResposta } : o));
+  const handleResolverOcorrencia = async (id: number | string, tempoResposta: string) => {
+    addResolvedLocalId(id);
+
+    setOcorrencias(prev => {
+      let matched = false;
+      let updated = prev.map(o => {
+        if (String(o.id) === String(id) || o.id === id) {
+          matched = true;
+          return { ...o, status: "RESOLVIDA" as const, tempoResposta };
+        }
+        return o;
+      });
+      if (!matched) {
+        const activeIdx = updated.findIndex(o => o.status === "ATIVA");
+        if (activeIdx !== -1) {
+          addResolvedLocalId(updated[activeIdx].id);
+          updated[activeIdx] = { ...updated[activeIdx], status: "RESOLVIDA" as const, tempoResposta };
+        }
+      }
+      saveCachedState({ ocorrencias: updated });
+      return updated;
+    });
+
     try {
       const res = await fetch(`/api/ocorrencias/${id}/resolver`, {
         method: "POST",
