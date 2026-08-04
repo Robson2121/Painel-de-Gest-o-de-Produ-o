@@ -14,12 +14,25 @@ import {
   Moon,
   Sun,
   Activity,
-  FileText
+  FileText,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  Zap
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { PedidoCarrinho, OcorrenciaLider, Usuario, Estatisticas, Turno } from "./types";
 import { hashPassword } from "./firebase";
 import { DEFAULT_TURNOS } from "./utils/turnos";
+import {
+  getCachedState,
+  saveCachedState,
+  getOfflineQueue,
+  enqueueOfflineAction,
+  processSyncQueue
+} from "./utils/offlineSync";
 
 // Importação das Visões Modulares
 import LoginView from "./components/LoginView";
@@ -29,6 +42,7 @@ import LogisticaView from "./components/LogisticaView";
 import LiderView from "./components/LiderView";
 import RelatoriosView from "./components/RelatoriosView";
 import AdminView from "./components/AdminView";
+import HistoricoSincronizacao from "./components/HistoricoSincronizacao";
 
 export default function App() {
   const [usuarioLogado, setUsuarioLogado] = useState<Usuario | null>(() => {
@@ -41,18 +55,28 @@ export default function App() {
   });
   const [temaEscuro, setTemaEscuro] = useState(true);
 
-  // Estados compartilhados de dados vindos do Express
-  const [pedidos, setPedidos] = useState<PedidoCarrinho[]>([]);
-  const [ocorrencias, setOcorrencias] = useState<OcorrenciaLider[]>([]);
-  const [usuarios, setUsuarios] = useState<Usuario[]>(INITIAL_USUARIOS);
-  const [ipsBloqueados, setIpsBloqueados] = useState<{ ip: string; tentatives?: number; tentativas: number }[]>([]);
-  const [turnos, setTurnos] = useState<Turno[]>(DEFAULT_TURNOS);
+  // Lê estado inicial armazenado no cache local offline
+  const initialCache = getCachedState();
+
+  // Estados compartilhados de dados vindos do Express e MongoDB / Local Fallback
+  const [pedidos, setPedidos] = useState<PedidoCarrinho[]>(initialCache?.pedidos || []);
+  const [ocorrencias, setOcorrencias] = useState<OcorrenciaLider[]>(initialCache?.ocorrencias || []);
+  const [usuarios, setUsuarios] = useState<Usuario[]>(initialCache?.usuarios || INITIAL_USUARIOS);
+  const [ipsBloqueados, setIpsBloqueados] = useState<{ ip: string; tentatives?: number; tentativas: number }[]>(initialCache?.ipsBloqueados || []);
+  const [turnos, setTurnos] = useState<Turno[]>(initialCache?.turnos || DEFAULT_TURNOS);
   const [estatisticas, setEstatisticas] = useState<Estatisticas>({
     total: 0,
     porMaquina: {},
     totalProblemas: 0,
     problemasPorMaquina: {}
   });
+
+  // Estados de resiliência e sincronização de conexão offline
+  const [servidorConectado, setServidorConectado] = useState(true);
+  const [sincronizando, setSincronizando] = useState(false);
+  const [pendentesSyncCount, setPendentesSyncCount] = useState<number>(() => getOfflineQueue().length);
+  const [statusSyncMsg, setStatusSyncMsg] = useState<string>("");
+  const [modalSyncAberto, setModalSyncAberto] = useState(false);
 
   // Aba ativa atual
   const [abaAtiva, setAbaAtiva] = useState<string>(() => {
@@ -186,6 +210,29 @@ export default function App() {
 
   // Função para carregar todos os dados do Express em lote de forma resiliente e segura
   const carregarDados = async () => {
+    // 1. Processa fila de ações pendentes se o servidor estiver disponível
+    const queue = getOfflineQueue();
+    setPendentesSyncCount(queue.length);
+
+    if (queue.length > 0 && !sincronizando) {
+      setSincronizando(true);
+      try {
+        const syncResult = await processSyncQueue();
+        if (syncResult.success) {
+          setServidorConectado(true);
+          setPendentesSyncCount(0);
+          if (syncResult.syncedCount > 0) {
+            setStatusSyncMsg(`✅ ${syncResult.syncedCount} ação(ões) offline sincronizada(s) automaticamente com o servidor!`);
+            setTimeout(() => setStatusSyncMsg(""), 4000);
+          }
+        }
+      } catch (e) {
+        setServidorConectado(false);
+      } finally {
+        setSincronizando(false);
+      }
+    }
+
     let success = true;
     const fetchSafe = async (url: string) => {
       try {
@@ -208,7 +255,6 @@ export default function App() {
         success = false;
         return null;
       } catch (err) {
-        // Ignora silenciosamente erros de conexão ou de rede temporários
         success = false;
         return null;
       }
@@ -223,19 +269,76 @@ export default function App() {
         fetchSafe("/api/turnos")
       ]);
 
-      if (resPedidos !== null) setPedidos(resPedidos);
-      if (resOcorrencias !== null) setOcorrencias(resOcorrencias);
-      if (resUsuarios !== null) setUsuarios(resUsuarios);
-      if (resIps !== null) setIpsBloqueados(resIps);
-      if (resTurnos !== null && Array.isArray(resTurnos) && resTurnos.length > 0) {
-        setTurnos(prev => JSON.stringify(prev) === JSON.stringify(resTurnos) ? prev : resTurnos);
+      if (success) {
+        setServidorConectado(true);
+      } else {
+        setServidorConectado(false);
       }
+
+      let novosPedidos = pedidos;
+      let novasOcorrencias = ocorrencias;
+      let novosUsuarios = usuarios;
+      let novosIps = ipsBloqueados;
+      let novosTurnos = turnos;
+
+      if (resPedidos !== null) {
+        setPedidos(resPedidos);
+        novosPedidos = resPedidos;
+      }
+      if (resOcorrencias !== null) {
+        setOcorrencias(resOcorrencias);
+        novasOcorrencias = resOcorrencias;
+      }
+      if (resUsuarios !== null) {
+        setUsuarios(resUsuarios);
+        novosUsuarios = resUsuarios;
+      }
+      if (resIps !== null) {
+        setIpsBloqueados(resIps);
+        novosIps = resIps;
+      }
+      if (resTurnos !== null && Array.isArray(resTurnos) && resTurnos.length > 0) {
+        setTurnos(prev => {
+          if (JSON.stringify(prev) === JSON.stringify(resTurnos)) return prev;
+          novosTurnos = resTurnos;
+          return resTurnos;
+        });
+      }
+
+      // Atualiza cache local para garantia de funcionamento se o servidor cair
+      saveCachedState({
+        pedidos: novosPedidos,
+        ocorrencias: novasOcorrencias,
+        usuarios: novosUsuarios,
+        ipsBloqueados: novosIps,
+        turnos: novosTurnos
+      });
+
       return success;
     } catch (err) {
-      // Ignora quaisquer outros erros inesperados no lote
+      setServidorConectado(false);
       return false;
     }
   };
+
+  // Efeito para monitorar status online/offline do navegador
+  useEffect(() => {
+    const handleOnline = () => {
+      setServidorConectado(true);
+      carregarDados();
+    };
+    const handleOffline = () => {
+      setServidorConectado(false);
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   // Efeito de polling a cada 2 segundos
   useEffect(() => {
@@ -267,62 +370,98 @@ export default function App() {
 
   // Handlers para as Visões
 
-  // 1. Cadastrar pedido de carrinho no MongoDB
+  // 1. Cadastrar pedido de carrinho no MongoDB / Fallback Offline
   const handleAdicionarPedido = async (maquina: string, pedido: string) => {
+    const novoPedido: PedidoCarrinho = {
+      id: Date.now(),
+      maquina,
+      pedido,
+      data: new Date().toLocaleString("pt-BR"),
+      timestamp: Date.now(),
+      status: "ATIVO"
+    };
+
     try {
       const res = await fetch("/api/pedidos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ maquina, pedido })
       });
-      if (!res.ok) throw new Error("Erro ao adicionar pedido");
+      if (!res.ok) throw new Error("Servidor indisponível");
       carregarDados();
     } catch (err) {
-      console.error("Erro ao adicionar pedido:", err);
+      console.warn("Servidor offline ao cadastrar pedido. Salvando localmente...", err);
+      setPedidos(prev => [...prev, novoPedido]);
+      enqueueOfflineAction("ADD_PEDIDO", { maquina, pedido });
+      saveCachedState({ pedidos: [...pedidos, novoPedido] });
+      setPendentesSyncCount(getOfflineQueue().length);
+      setStatusSyncMsg("⚡ Conexão offline: Pedido gravado localmente. Será sincronizado automaticamente ao restabelecer o servidor.");
+      setTimeout(() => setStatusSyncMsg(""), 5000);
     }
   };
 
-  // 2. Finalizar pedido de carrinho no MongoDB
+  // 2. Finalizar pedido de carrinho no MongoDB / Fallback Offline
   const handleFinalizarPedido = async (id: number) => {
     // Atualização otimista imediata da interface
     setPedidos(prev => prev.map(p => String(p.id) === String(id) || p.id === id ? { ...p, status: "FINALIZADO" } : p));
     try {
       const res = await fetch(`/api/pedidos/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Erro ao finalizar pedido");
+      if (!res.ok) throw new Error("Servidor indisponível");
       carregarDados();
     } catch (err) {
-      console.error("Erro ao finalizar pedido:", err);
-      carregarDados();
+      console.warn("Servidor offline ao finalizar pedido. Enfileirando ação...", err);
+      enqueueOfflineAction("FINALIZE_PEDIDO", { id });
+      setPendentesSyncCount(getOfflineQueue().length);
+      setStatusSyncMsg("⚡ Conexão offline: Finalização gravada na fila de sincronização.");
+      setTimeout(() => setStatusSyncMsg(""), 4000);
     }
   };
 
-  // 3. Cadastrar ocorrência de máquina parada no MongoDB
+  // 3. Cadastrar ocorrência de máquina parada no MongoDB / Fallback Offline
   const handleAdicionarOcorrencia = async (maquina: string, motivo: string) => {
+    const novaOcorrencia: OcorrenciaLider = {
+      id: Date.now(),
+      maquina,
+      motivo,
+      data: new Date().toLocaleTimeString("pt-BR"),
+      timestamp: Date.now(),
+      status: "ATIVA"
+    };
+
     try {
       const res = await fetch("/api/ocorrencias", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ maquina, motivo })
       });
-      if (!res.ok) throw new Error("Erro ao adicionar ocorrência");
+      if (!res.ok) throw new Error("Servidor indisponível");
       carregarDados();
     } catch (err) {
-      console.error("Erro ao adicionar ocorrência:", err);
+      console.warn("Servidor offline ao adicionar ocorrência. Salvando localmente...", err);
+      setOcorrencias(prev => [novaOcorrencia, ...prev]);
+      enqueueOfflineAction("ADD_OCORRENCIA", { maquina, motivo });
+      saveCachedState({ ocorrencias: [novaOcorrencia, ...ocorrencias] });
+      setPendentesSyncCount(getOfflineQueue().length);
+      setStatusSyncMsg("🚨 Conexão offline: Chamado gravado localmente. Será enviado assim que o servidor retornar.");
+      setTimeout(() => setStatusSyncMsg(""), 5000);
     }
   };
 
-  // 4. Resolver ocorrência com tempo de resposta no MongoDB
+  // 4. Resolver ocorrência com tempo de resposta no MongoDB / Fallback Offline
   const handleResolverOcorrencia = async (id: number, tempoResposta: string) => {
+    setOcorrencias(prev => prev.map(o => String(o.id) === String(id) || o.id === id ? { ...o, status: "RESOLVIDA", tempoResposta } : o));
     try {
       const res = await fetch(`/api/ocorrencias/${id}/resolver`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tempoResposta })
       });
-      if (!res.ok) throw new Error("Erro ao resolver ocorrência");
+      if (!res.ok) throw new Error("Servidor indisponível");
       carregarDados();
     } catch (err) {
-      console.error("Erro ao resolver ocorrência:", err);
+      console.warn("Servidor offline ao resolver ocorrência. Enfileirando ação...", err);
+      enqueueOfflineAction("RESOLVE_OCORRENCIA", { id, tempoResposta });
+      setPendentesSyncCount(getOfflineQueue().length);
     }
   };
 
@@ -395,18 +534,22 @@ export default function App() {
     }
   };
 
-  // 10. Forçar sincronização imediata com os pedidos no painel da logística e ocorrências do Líder
+  // 10. Forçar sincronização imediata com os pedidos no painel da logística e ocorrências do dia
   const handleSincronizar = async () => {
     try {
+      // 1. Processa qualquer ação pendente na fila offline
+      await processSyncQueue();
+
+      // 2. Sincroniza e recarrega todos os pedidos da Logística e ocorrências do servidor
       const ok = await carregarDados();
       if (ok) {
-        alert("✅ Sincronização realizada! Dados atualizados com os pedidos da Logística.");
+        alert("✅ Sincronização concluída! Dados atualizados com todos os pedidos do painel da logística e ocorrências ocorridas no dia de hoje.");
       } else {
-        alert("⚠️ Alguns dados podem não ter sido sincronizados. Verifique a conexão com o servidor.");
+        alert("⚠️ Alguns dados de rede podem estar desatualizados. Verifique a conexão com o servidor.");
       }
     } catch (err) {
       console.error("Erro ao sincronizar:", err);
-      alert("❌ Erro ao sincronizar com os dados da Logística.");
+      alert("❌ Erro ao sincronizar com os dados da Logística e Ocorrências.");
     }
   };
 
@@ -456,7 +599,8 @@ export default function App() {
         { id: "logistica", label: "Logística", icon: Landmark },
         { id: "lider", label: "Liderança", icon: Activity },
         { id: "relatorios", label: "Relatórios", icon: FileText },
-        { id: "admin", label: "Administração", icon: Users }
+        { id: "admin", label: "Administração", icon: Users },
+        { id: "sync_history", label: "Histórico Sync", icon: Zap }
       ];
     }
 
@@ -468,6 +612,9 @@ export default function App() {
       abas.push({ id: "dashboard", label: "Dashboard BI", icon: Layout });
       abas.push({ id: "relatorios", label: "Relatórios", icon: FileText });
     }
+    
+    // Todas as funções operacionais também têm acesso para auditar a resiliência de rede
+    abas.push({ id: "sync_history", label: "Histórico Sync", icon: Zap });
 
     return abas;
   };
@@ -493,14 +640,17 @@ export default function App() {
   const handleSalvarTurnos = async (novosTurnos: Turno[]) => {
     setTurnos(novosTurnos);
     try {
-      await fetch("/api/turnos", {
+      const res = await fetch("/api/turnos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ turnos: novosTurnos })
       });
+      if (!res.ok) throw new Error("Servidor indisponível");
       await carregarDados();
     } catch (err) {
-      console.error("Erro ao salvar turnos:", err);
+      console.warn("Servidor offline ao salvar turnos. Enfileirando ação...", err);
+      enqueueOfflineAction("SAVE_TURNOS", { turnos: novosTurnos });
+      setPendentesSyncCount(getOfflineQueue().length);
     }
   };
 
@@ -512,7 +662,7 @@ export default function App() {
       <header className={`border-b ${temaEscuro ? "bg-slate-800 border-slate-700/60" : "bg-white border-slate-200"} sticky top-0 z-50 transition-colors`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <span className="h-8 w-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-extrabold text-sm shadow-md shadow-blue-500/10">
                 ⚙️
               </span>
@@ -524,6 +674,30 @@ export default function App() {
                   Tecnologia e Controle Operacional
                 </span>
               </div>
+
+              {/* Indicador de Status Online / Offline / Sync */}
+              <button
+                onClick={() => setModalSyncAberto(true)}
+                className="ml-2 cursor-pointer focus:outline-none hover:scale-105 transition-transform"
+                title="Clique para abrir o Histórico de Sincronização de Rede"
+              >
+                {sincronizando ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-blue-500/15 text-blue-300 border border-blue-500/30 animate-pulse">
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                    Sincronizando...
+                  </span>
+                ) : !servidorConectado ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                    <WifiOff className="h-3 w-3 text-amber-400" />
+                    Modo Offline {pendentesSyncCount > 0 ? `(${pendentesSyncCount} pendentes)` : ""}
+                  </span>
+                ) : (
+                  <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
+                    <Wifi className="h-3 w-3 text-emerald-400" />
+                    Online (MongoDB/Sync OK)
+                  </span>
+                )}
+              </button>
             </div>
 
             <div className="flex items-center gap-4">
@@ -666,9 +840,42 @@ export default function App() {
                 usuarioLogado={usuarioLogado}
               />
             )}
+            {abaAtiva === "sync_history" && (
+              <HistoricoSincronizacao
+                servidorConectado={servidorConectado}
+                onDataSynced={carregarDados}
+              />
+            )}
           </motion.div>
         </AnimatePresence>
       </main>
+
+      {/* Modal Overlay do Histórico de Sincronização */}
+      <AnimatePresence>
+        {modalSyncAberto && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto"
+            onClick={() => setModalSyncAberto(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-5xl my-auto"
+            >
+              <HistoricoSincronizacao
+                servidorConectado={servidorConectado}
+                onDataSynced={carregarDados}
+                onClose={() => setModalSyncAberto(false)}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

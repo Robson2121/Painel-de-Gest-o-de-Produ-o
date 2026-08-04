@@ -4,7 +4,7 @@
  */
 
 import React, { useRef, useState } from "react";
-import { Table, Trash2, FileSpreadsheet, FileText, RefreshCw, UploadCloud, Clock, CheckSquare, Filter, Layers } from "lucide-react";
+import { Table, FileSpreadsheet, FileText, RefreshCw, UploadCloud, Clock, CheckSquare, Filter, Layers } from "lucide-react";
 import { PedidoCarrinho, OcorrenciaLider, Estatisticas, Turno } from "../types";
 import { DEFAULT_TURNOS, pertenceAoTurno } from "../utils/turnos";
 import { exportarParaExcel, exportarParaWord } from "../utils/exportHelpers";
@@ -14,7 +14,7 @@ interface RelatoriosViewProps {
   ocorrencias: OcorrenciaLider[];
   estatisticas: Estatisticas;
   turnos?: Turno[];
-  onZerarRelatorio: () => Promise<void>;
+  onZerarRelatorio?: () => Promise<void>;
   onLimparHistoricoLider: () => Promise<void>;
   onSincronizar: () => Promise<void>;
   onImportarCSV: (dadosImportados: { porMaquina: Record<string, number>; chamadosLider: any[] }) => void;
@@ -25,7 +25,6 @@ export default function RelatoriosView({
   ocorrencias,
   estatisticas,
   turnos = DEFAULT_TURNOS,
-  onZerarRelatorio,
   onLimparHistoricoLider,
   onSincronizar,
   onImportarCSV
@@ -161,6 +160,7 @@ export default function RelatoriosView({
               setOcultarPendentes(false);
             }}
             className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 font-bold text-xs rounded-xl text-slate-300 hover:text-white border border-slate-600 transition-colors cursor-pointer"
+            title="Sincronizar pedidos do painel da logística e ocorrências do dia atual"
           >
             <RefreshCw className="h-4 w-4" />
             Sincronizar
@@ -169,6 +169,7 @@ export default function RelatoriosView({
           <button
             onClick={() => fileInputRef.current?.click()}
             className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 font-bold text-xs rounded-xl text-slate-300 hover:text-white border border-slate-600 transition-colors cursor-pointer"
+            title="Carregar dados de arquivo CSV"
           >
             <UploadCloud className="h-4 w-4" />
             CSV
@@ -200,17 +201,6 @@ export default function RelatoriosView({
           >
             <FileText className="h-4 w-4" />
             {gerandoWord ? "Gerando Word..." : "Exportar Word (.docx)"}
-          </button>
-
-          <button
-            onClick={async () => {
-              await onZerarRelatorio();
-              setOcultarPendentes(true);
-            }}
-            className="flex items-center justify-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 font-bold text-xs rounded-xl text-white shadow-md transition-colors cursor-pointer"
-          >
-            <Trash2 className="h-4 w-4" />
-            Zerar Tudo
           </button>
         </div>
       </div>

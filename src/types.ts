@@ -42,3 +42,34 @@ export interface Estatisticas {
   totalProblemas: number;
   problemasPorMaquina: Record<string, number>;
 }
+
+export interface SyncHistoryItem {
+  id: string;
+  type: "ADD_PEDIDO" | "FINALIZE_PEDIDO" | "ADD_OCORRENCIA" | "RESOLVE_OCORRENCIA" | "SAVE_TURNOS";
+  description: string;
+  timestamp: number;
+  syncedAt?: number;
+  status: "PENDENTE" | "SUCESSO" | "FALHA";
+  detalhes?: string;
+  payloadInfo?: string;
+}
+
+export interface BackupLog {
+  id: string;
+  data: string;
+  timestamp: number;
+  dataReferencia: string;
+  status: 'SUCESSO' | 'ERRO';
+  origem: 'MONGODB' | 'LOCAL_FALLBACK';
+  tipo: 'AUTOMATICO_DIARIO' | 'MANUAL_ADMIN';
+  arquivo: string;
+  tamanhoBytes: number;
+  estatisticas: {
+    pedidos: number;
+    ocorrencias: number;
+    usuarios: number;
+    ipsBloqueados: number;
+    turnos: number;
+  };
+  mensagem?: string;
+}

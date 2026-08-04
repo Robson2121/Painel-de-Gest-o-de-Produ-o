@@ -4,8 +4,8 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { Users, Shield, ShieldAlert, Trash2, Key, UserPlus, Clock, Plus, Save, RotateCcw } from "lucide-react";
-import { Usuario, Turno } from "../types";
+import { Users, Shield, ShieldAlert, Trash2, Key, UserPlus, Clock, Plus, Save, RotateCcw, Database, Download, RefreshCw, FileJson, CheckCircle2, AlertCircle, HardDrive } from "lucide-react";
+import { Usuario, Turno, BackupLog } from "../types";
 import { DEFAULT_TURNOS, obterTurnoAtual } from "../utils/turnos";
 
 interface AdminViewProps {
@@ -41,6 +41,53 @@ export default function AdminView({
   const [statusTurno, setStatusTurno] = useState("");
   const [erroTurno, setErroTurno] = useState("");
   const [salvandoTurnos, setSalvandoTurnos] = useState(false);
+
+  // Estado de Backups
+  const [backupsLogs, setBackupsLogs] = useState<BackupLog[]>([]);
+  const [origemDb, setOrigemDb] = useState<string>("LOCAL_FALLBACK");
+  const [carregandoBackups, setCarregandoBackups] = useState(false);
+  const [gerandoBackup, setGerandoBackup] = useState(false);
+  const [statusBackupMsg, setStatusBackupMsg] = useState("");
+
+  const carregarBackups = async () => {
+    setCarregandoBackups(true);
+    try {
+      const res = await fetch("/api/admin/backups?_t=" + Date.now());
+      if (res.ok) {
+        const data = await res.json();
+        setBackupsLogs(data.logs || []);
+        setOrigemDb(data.origemAtual || "LOCAL_FALLBACK");
+      }
+    } catch (e) {
+      console.error("Erro ao carregar lista de backups:", e);
+    } finally {
+      setCarregandoBackups(false);
+    }
+  };
+
+  useEffect(() => {
+    carregarBackups();
+  }, []);
+
+  const handleGerarBackupManual = async () => {
+    setGerandoBackup(true);
+    setStatusBackupMsg("");
+    try {
+      const res = await fetch("/api/admin/backups/executar", { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setStatusBackupMsg("✅ Backup JSON gerado e salvo com sucesso!");
+        await carregarBackups();
+      } else {
+        setStatusBackupMsg("❌ Falha ao gerar backup manual.");
+      }
+    } catch (e: any) {
+      setStatusBackupMsg("❌ Erro de comunicação com o servidor ao gerar backup.");
+    } finally {
+      setGerandoBackup(false);
+      setTimeout(() => setStatusBackupMsg(""), 5000);
+    }
+  };
 
   useEffect(() => {
     // Sincroniza com os turnos do servidor somente se não houver edição pendente do usuário
@@ -466,6 +513,160 @@ export default function AdminView({
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+
+        {/* MÓDULO EXCLUSIVO DO ADMINISTRADOR: BACKUP AUTOMÁTICO E LOGS JSON DO MONGODB */}
+        <div className="bg-slate-800 border border-slate-700 p-6 rounded-2xl space-y-6 lg:col-span-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-700/60 pb-4">
+            <div>
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Database className="h-5.5 w-5.5 text-blue-400" />
+                Backups Automáticos Diários & Logs Persistentes do MongoDB
+              </h3>
+              <p className="text-slate-400 text-xs mt-1">
+                Rotina automática agendada salva diariamente um log JSON completo com o snapshot dos dados industriais.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {origemDb === "MONGODB" ? (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  MongoDB Conectado
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-amber-500/10 text-amber-300 border border-amber-500/30">
+                  <HardDrive className="w-3.5 h-3.5 text-amber-400" />
+                  Banco Local Auto-Persistido (db.json)
+                </span>
+              )}
+
+              <button
+                onClick={handleGerarBackupManual}
+                disabled={gerandoBackup}
+                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg hover:shadow-blue-500/20 disabled:opacity-50 transition-all flex items-center gap-2 cursor-pointer"
+              >
+                {gerandoBackup ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin text-white" />
+                    Gerando Backup JSON...
+                  </>
+                ) : (
+                  <>
+                    <FileJson className="h-4 w-4 text-blue-200" />
+                    Gerar Backup Manual Agora
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={carregarBackups}
+                disabled={carregandoBackups}
+                className="p-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-xl transition-all cursor-pointer"
+                title="Atualizar Logs"
+              >
+                <RefreshCw className={`h-4 w-4 ${carregandoBackups ? "animate-spin" : ""}`} />
+              </button>
+            </div>
+          </div>
+
+          {statusBackupMsg && (
+            <div className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2 ${
+              statusBackupMsg.includes("✅") 
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300" 
+                : "bg-red-500/10 border-red-500/30 text-red-300"
+            }`}>
+              {statusBackupMsg.includes("✅") ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+              {statusBackupMsg}
+            </div>
+          )}
+
+          {/* Histórico e Tabela de Backups */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                Arquivos de Log em JSON ({backupsLogs.length} salvos)
+              </span>
+              <span className="text-[11px] text-slate-400">
+                Acesso Restrito ao Cargo Administrador
+              </span>
+            </div>
+
+            <div className="overflow-x-auto max-h-[350px] overflow-y-auto pr-1">
+              <table className="min-w-full divide-y divide-slate-700 text-sm">
+                <thead>
+                  <tr className="text-slate-400 text-xs font-semibold uppercase text-left">
+                    <th className="py-2.5 px-3 bg-slate-900/60 rounded-l-xl">Data / Hora</th>
+                    <th className="py-2.5 px-3 bg-slate-900/60">Tipo</th>
+                    <th className="py-2.5 px-3 bg-slate-900/60">Origem</th>
+                    <th className="py-2.5 px-3 bg-slate-900/60">Arquivo JSON</th>
+                    <th className="py-2.5 px-3 bg-slate-900/60">Conteúdo do Snapshot</th>
+                    <th className="py-2.5 px-3 bg-slate-900/60 rounded-r-xl text-right">Download</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-700/50">
+                  {backupsLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-500 text-xs">
+                        Nenhum backup em arquivo JSON registrado até o momento. Clique em "Gerar Backup Manual Agora" ou aguarde a rotina diária automática.
+                      </td>
+                    </tr>
+                  ) : (
+                    backupsLogs.map(log => (
+                      <tr key={log.id} className="text-slate-300 hover:bg-slate-900/20 transition-colors">
+                        <td className="py-2.5 px-3 font-mono text-xs font-bold text-white whitespace-nowrap">
+                          {log.data}
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          {log.tipo === "AUTOMATICO_DIARIO" ? (
+                            <span className="inline-flex items-center gap-1 bg-purple-500/10 text-purple-300 border border-purple-500/20 px-2 py-0.5 rounded-lg text-[11px] font-bold">
+                              ⏰ Automático Diário
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 bg-blue-500/10 text-blue-300 border border-blue-500/20 px-2 py-0.5 rounded-lg text-[11px] font-bold">
+                              👤 Manual Admin
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <span className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold border ${
+                            log.origem === "MONGODB" 
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                              : "bg-slate-900 text-slate-400 border-slate-700"
+                          }`}>
+                            {log.origem}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-xs text-slate-300 whitespace-nowrap">
+                          {log.arquivo}
+                          <span className="text-[10px] text-slate-500 ml-2">
+                            ({(log.tamanhoBytes / 1024).toFixed(1)} KB)
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-xs text-slate-400 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <span title="Pedidos">{log.estatisticas?.pedidos ?? 0} pedidos</span> •
+                            <span title="Ocorrências">{log.estatisticas?.ocorrencias ?? 0} ocorrências</span> •
+                            <span title="Usuários">{log.estatisticas?.usuarios ?? 0} usuários</span>
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                          <a
+                            href={`/api/admin/backups/download/${log.arquivo}`}
+                            download={log.arquivo}
+                            className="inline-flex items-center gap-1 px-3 py-1 bg-slate-900 hover:bg-slate-700 text-blue-400 border border-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            JSON
+                          </a>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>

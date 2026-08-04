@@ -61,6 +61,26 @@ interface Turno {
   termino: string;
 }
 
+interface BackupLog {
+  id: string;
+  data: string;
+  timestamp: number;
+  dataReferencia: string;
+  status: 'SUCESSO' | 'ERRO';
+  origem: 'MONGODB' | 'LOCAL_FALLBACK';
+  tipo: 'AUTOMATICO_DIARIO' | 'MANUAL_ADMIN';
+  arquivo: string;
+  tamanhoBytes: number;
+  estatisticas: {
+    pedidos: number;
+    ocorrencias: number;
+    usuarios: number;
+    ipsBloqueados: number;
+    turnos: number;
+  };
+  mensagem?: string;
+}
+
 const DEFAULT_TURNOS: Turno[] = [
   { id: "t1", nome: "1º Turno (Manhã)", inicio: "06:00", termino: "14:00" },
   { id: "t2", nome: "2º Turno (Tarde)", inicio: "14:00", termino: "22:00" },
@@ -133,6 +153,157 @@ function saveLocalDb() {
     fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(localDatabase, null, 2), "utf8");
   } catch (err) {
     console.error("Erro ao salvar banco de dados local:", err);
+  }
+}
+
+// Configuração do Diretório e Gerenciador de Backups em JSON
+const BACKUPS_DIR = path.join(process.cwd(), "backups");
+const BACKUPS_INDEX_PATH = path.join(BACKUPS_DIR, "backups_index.json");
+
+function getBackupLogs(): BackupLog[] {
+  try {
+    if (fs.existsSync(BACKUPS_INDEX_PATH)) {
+      const content = fs.readFileSync(BACKUPS_INDEX_PATH, "utf8");
+      return JSON.parse(content);
+    }
+  } catch (e) {
+    console.error("Erro ao ler índice de backups:", e);
+  }
+  return [];
+}
+
+function saveBackupLogs(logs: BackupLog[]) {
+  try {
+    if (!fs.existsSync(BACKUPS_DIR)) {
+      fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+    }
+    fs.writeFileSync(BACKUPS_INDEX_PATH, JSON.stringify(logs, null, 2), "utf8");
+  } catch (e) {
+    console.error("Erro ao salvar índice de backups:", e);
+  }
+}
+
+async function executarBackup(tipo: 'AUTOMATICO_DIARIO' | 'MANUAL_ADMIN', mensagemCustom?: string): Promise<BackupLog> {
+  if (!fs.existsSync(BACKUPS_DIR)) {
+    fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+  }
+
+  const timestamp = Date.now();
+  const agora = new Date();
+  const dataFormatada = agora.toLocaleString("pt-BR");
+  const dataReferencia = agora.toISOString().split("T")[0]; // YYYY-MM-DD
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const dataHoraSlug = `${dataReferencia}_${pad(agora.getHours())}-${pad(agora.getMinutes())}-${pad(agora.getSeconds())}`;
+  const filename = `backup_${dataHoraSlug}.json`;
+  const filePath = path.join(BACKUPS_DIR, filename);
+
+  try {
+    const [pedidos, ocorrencias, usuarios, ipsBloqueados, turnos] = await Promise.all([
+      getPedidos(),
+      getOcorrencias(),
+      getUsuarios(),
+      getIpsBloqueados(),
+      getTurnos()
+    ]);
+
+    const backupPayload = {
+      metadata: {
+        versao: "1.0",
+        data: dataFormatada,
+        timestamp,
+        dataReferencia,
+        origem: isConnectedToMongo ? "MONGODB" : "LOCAL_FALLBACK",
+        tipo,
+        mensagem: mensagemCustom || (tipo === "AUTOMATICO_DIARIO" ? "Backup diário automático gerado com sucesso." : "Backup manual gerado pelo Administrador.")
+      },
+      estatisticas: {
+        pedidos: pedidos.length,
+        ocorrencias: ocorrencias.length,
+        usuarios: usuarios.length,
+        ipsBloqueados: ipsBloqueados.length,
+        turnos: turnos.length
+      },
+      dados: {
+        pedidos,
+        ocorrencias,
+        usuarios,
+        ipsBloqueados,
+        turnos
+      }
+    };
+
+    const contentStr = JSON.stringify(backupPayload, null, 2);
+    fs.writeFileSync(filePath, contentStr, "utf8");
+
+    // Copia persistente para coleção de histórico no MongoDB se conectado
+    if (isConnectedToMongo && mongoDb) {
+      try {
+        await mongoDb.collection("backups_logs").insertOne({
+          filename,
+          timestamp,
+          dataReferencia,
+          tipo,
+          content: backupPayload
+        });
+      } catch (mErr) {
+        console.error("Erro ao registrar backup no MongoDB:", mErr);
+      }
+    }
+
+    const logEntry: BackupLog = {
+      id: "bkp_" + timestamp,
+      data: dataFormatada,
+      timestamp,
+      dataReferencia,
+      status: "SUCESSO",
+      origem: isConnectedToMongo ? "MONGODB" : "LOCAL_FALLBACK",
+      tipo,
+      arquivo: filename,
+      tamanhoBytes: Buffer.byteLength(contentStr, "utf8"),
+      estatisticas: backupPayload.estatisticas,
+      mensagem: backupPayload.metadata.mensagem
+    };
+
+    const logs = getBackupLogs();
+    logs.unshift(logEntry);
+    saveBackupLogs(logs);
+
+    console.log(`[Industrial Backup] ✅ Backup (${tipo}) gerado com sucesso: ${filename} (${(logEntry.tamanhoBytes / 1024).toFixed(1)} KB)`);
+    return logEntry;
+  } catch (err: any) {
+    console.error(`[Industrial Backup] ❌ Erro ao executar backup (${tipo}):`, err);
+    const logErro: BackupLog = {
+      id: "err_" + timestamp,
+      data: dataFormatada,
+      timestamp,
+      dataReferencia,
+      status: "ERRO",
+      origem: isConnectedToMongo ? "MONGODB" : "LOCAL_FALLBACK",
+      tipo,
+      arquivo: filename,
+      tamanhoBytes: 0,
+      estatisticas: { pedidos: 0, ocorrencias: 0, usuarios: 0, ipsBloqueados: 0, turnos: 0 },
+      mensagem: err.message || "Erro desconhecido ao realizar backup."
+    };
+    const logs = getBackupLogs();
+    logs.unshift(logErro);
+    saveBackupLogs(logs);
+    return logErro;
+  }
+}
+
+async function verificarEExecutarBackupDiario() {
+  try {
+    const hoje = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+    const logs = getBackupLogs();
+    const jaFezHoje = logs.some(l => l.dataReferencia === hoje && l.tipo === "AUTOMATICO_DIARIO" && l.status === "SUCESSO");
+
+    if (!jaFezHoje) {
+      console.log(`[Industrial Backup] ⏰ Nenhum backup diário encontrado para a data ${hoje}. Executando backup automático...`);
+      await executarBackup("AUTOMATICO_DIARIO");
+    }
+  } catch (e) {
+    console.error("Erro na verificação do backup diário automático:", e);
   }
 }
 
@@ -803,6 +974,121 @@ async function startServer() {
     }
   });
 
+  // --- SINCRONIZAÇÃO EM LOTE OFFLINE ---
+  app.post("/api/sync", async (req, res) => {
+    const { queue } = req.body;
+    if (!Array.isArray(queue)) {
+      return res.status(400).json({ error: "Fila de ações inválida." });
+    }
+
+    try {
+      let processedCount = 0;
+      for (const item of queue) {
+        if (!item || !item.type) continue;
+
+        switch (item.type) {
+          case "ADD_PEDIDO":
+            if (item.payload) {
+              await addPedido(item.payload);
+              processedCount++;
+            }
+            break;
+          case "FINALIZE_PEDIDO":
+            if (item.payload && item.payload.id) {
+              await deletePedido(item.payload.id);
+              processedCount++;
+            }
+            break;
+          case "ADD_OCORRENCIA":
+            if (item.payload) {
+              await addOcorrencia(item.payload);
+              processedCount++;
+            }
+            break;
+          case "RESOLVE_OCORRENCIA":
+            if (item.payload && item.payload.id) {
+              await resolverOcorrencia(item.payload.id, item.payload.tempoResposta || "01m 20s");
+              processedCount++;
+            }
+            break;
+          case "SAVE_TURNOS":
+            if (item.payload && Array.isArray(item.payload.turnos)) {
+              await saveTurnos(item.payload.turnos);
+              processedCount++;
+            }
+            break;
+        }
+      }
+
+      const [pedidos, ocorrencias, usuarios, ipsBloqueados, turnos] = await Promise.all([
+        getPedidos(),
+        getOcorrencias(),
+        getUsuarios(),
+        getIpsBloqueados(),
+        getTurnos()
+      ]);
+
+      res.json({
+        success: true,
+        processedCount,
+        currentData: {
+          pedidos,
+          ocorrencias,
+          usuarios,
+          ipsBloqueados,
+          turnos
+        }
+      });
+    } catch (err: any) {
+      console.error("Erro no POST /api/sync:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- GERENCIAMENTO DE BACKUPS (ADMINISTRADOR) ---
+  app.get("/api/admin/backups", async (req, res) => {
+    try {
+      const logs = getBackupLogs();
+      res.json({
+        logs,
+        isConnectedToMongo,
+        origemAtual: isConnectedToMongo ? "MONGODB" : "LOCAL_FALLBACK",
+        totalBackups: logs.filter(l => l.status === "SUCESSO").length
+      });
+    } catch (err: any) {
+      console.error("Erro no GET /api/admin/backups:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/admin/backups/executar", async (req, res) => {
+    try {
+      const log = await executarBackup("MANUAL_ADMIN", "Backup manual acionado via painel do Administrador.");
+      res.json({ success: true, log });
+    } catch (err: any) {
+      console.error("Erro no POST /api/admin/backups/executar:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/admin/backups/download/:filename", (req, res) => {
+    try {
+      const filename = path.basename(req.params.filename);
+      const filePath = path.join(BACKUPS_DIR, filename);
+
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: "Arquivo de backup não encontrado." });
+      }
+
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      fs.createReadStream(filePath).pipe(res);
+    } catch (err: any) {
+      console.error("Erro no download de backup:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Setup do Vite / Static Files
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -825,9 +1111,23 @@ async function startServer() {
     console.log(`[Industrial Server] Running on http://localhost:${PORT}`);
     
     // Conecta ao MongoDB em segundo plano para não atrasar a inicialização do applet
-    connectToMongo().catch(err => {
+    connectToMongo().then(() => {
+      // Verifica e executa o backup automático diário assim que a conexão estiver pronta
+      verificarEExecutarBackupDiario().catch(err => {
+        console.error("[Industrial Backup] Erro na rotina de backup diário inicial:", err);
+      });
+    }).catch(err => {
       console.error("[Industrial Server] Falha ao tentar conectar ao MongoDB em segundo plano:", err);
+      // Mesmo no fallback local, verifica se é necessário backup diário
+      verificarEExecutarBackupDiario().catch(e => console.error("Erro no backup diário fallback:", e));
     });
+
+    // Agenda checagem periódica de backup diário automático a cada 1 hora
+    setInterval(() => {
+      verificarEExecutarBackupDiario().catch(err => {
+        console.error("[Industrial Backup] Erro no agendamento periódico de backup diário:", err);
+      });
+    }, 60 * 60 * 1000);
   });
 }
 
