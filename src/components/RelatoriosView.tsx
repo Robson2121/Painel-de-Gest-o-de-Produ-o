@@ -146,8 +146,8 @@ export default function RelatoriosView({
               className="bg-transparent text-white text-xs font-bold focus:outline-none cursor-pointer"
             >
               <option value="TODOS" className="bg-slate-900 text-white">Todos os Turnos</option>
-              {listaTurnos.map(t => (
-                <option key={t.id} value={t.id} className="bg-slate-900 text-white">
+              {listaTurnos.map((t, idx) => (
+                <option key={t.id ? `turno-opt-${t.id}-${idx}` : `turno-opt-${idx}`} value={t.id} className="bg-slate-900 text-white">
                   {t.nome} ({t.inicio} - {t.termino})
                 </option>
               ))}
@@ -213,7 +213,7 @@ export default function RelatoriosView({
         </h3>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {listaTurnos.map(t => {
+          {listaTurnos.map((t, idx) => {
             const pTurno = pedidos.filter(p => pertenceAoTurno(p.timestamp, t));
             const oTurno = ocorrencias.filter(o => pertenceAoTurno(o.timestamp, t));
             const ent = pTurno.filter(p => p.status === "FINALIZADO").length;
@@ -221,7 +221,7 @@ export default function RelatoriosView({
 
             return (
               <div
-                key={t.id}
+                key={t.id ? `turno-card-${t.id}-${idx}` : `turno-card-${idx}`}
                 className={`p-4 rounded-xl border space-y-2 ${
                   filtroTurnoId === t.id
                     ? "bg-amber-500/10 border-amber-500/40 text-white"
@@ -275,10 +275,10 @@ export default function RelatoriosView({
                     </td>
                   </tr>
                 ) : (
-                  exibidosPedidos.map(p => {
+                  exibidosPedidos.map((p, idx) => {
                     const turnoNome = listaTurnos.find(t => pertenceAoTurno(p.timestamp, t))?.nome || "Indefinido";
                     return (
-                      <tr key={p.id} className="text-slate-300 hover:bg-slate-900/20 transition-colors">
+                      <tr key={p.id ? `pedido-${p.id}-${idx}` : `pedido-idx-${idx}`} className="text-slate-300 hover:bg-slate-900/20 transition-colors">
                         <td className="py-3 px-4 font-bold text-white">{p.maquina}</td>
                         <td className="py-3 px-4">
                           <span className="inline-block bg-slate-900 text-slate-300 text-xs px-2.5 py-1 rounded-lg border border-slate-700 font-semibold">
@@ -344,10 +344,10 @@ export default function RelatoriosView({
                     </td>
                   </tr>
                 ) : (
-                  chamadosResolvidos.map(h => {
+                  chamadosResolvidos.map((h, idx) => {
                     const turnoNome = listaTurnos.find(t => pertenceAoTurno(h.timestamp, t))?.nome || "Indefinido";
                     return (
-                      <tr key={h.id} className="text-slate-300 hover:bg-slate-900/20 transition-colors">
+                      <tr key={h.id ? `chamado-${h.id}-${idx}` : `chamado-idx-${idx}`} className="text-slate-300 hover:bg-slate-900/20 transition-colors">
                         <td className="py-3 px-4 font-bold text-white">{h.maquina}</td>
                         <td className="py-3 px-4 text-xs max-w-[150px] truncate">{h.motivo}</td>
                         <td className="py-3 px-4">

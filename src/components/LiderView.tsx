@@ -229,7 +229,7 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
 
   const obterEstiloGravidade = (motivo: string) => {
     const m = motivo.toUpperCase();
-    if (m.includes("BICO") || m.includes("BICO INJETOR")) {
+    if (m.includes("BICO") || m.includes("BICO INJETOR") || m.includes("MATRIZ")) {
       return {
         border: "border-red-500",
         bg: "bg-red-500/10",
@@ -335,7 +335,7 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
           <AlertOctagon className={`h-8 w-8 ${alarmeAtivo && !silenciado ? "text-red-500 animate-bounce" : "text-slate-500"}`} />
           <div>
             <h3 className="text-white font-bold text-base">Painel de Alertas de Parada</h3>
-            <p className="text-xs text-slate-400">Atendimento a paradas de injetoras plásticas e controle de MTTR.</p>
+            <p className="text-xs text-slate-400">Atendimento a paradas de moldadoras industriais e controle de MTTR.</p>
           </div>
         </div>
 
@@ -365,7 +365,7 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
       {chamadosAtivos.length === 0 ? (
         <div className="bg-slate-800 border border-dashed border-slate-700 rounded-2xl p-12 text-center text-slate-500">
           <CheckCircle className="h-12 w-12 text-slate-600 mx-auto mb-3" />
-          <h4 className="text-white font-bold text-base mb-1">Injetoras Operando Normalmente</h4>
+          <h4 className="text-white font-bold text-base mb-1">Moldadoras Operando Normalmente</h4>
           <p className="text-xs text-slate-400 max-w-sm mx-auto">
             Não existem alarmes de máquina parada ou chamados do líder ativos neste momento.
           </p>

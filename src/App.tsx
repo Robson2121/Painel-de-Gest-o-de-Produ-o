@@ -709,9 +709,6 @@ export default function App() {
       abas.push({ id: "dashboard", label: "Dashboard BI", icon: Layout });
       abas.push({ id: "relatorios", label: "Relatórios", icon: FileText });
     }
-    
-    // Todas as funções operacionais também têm acesso para auditar a resiliência de rede
-    abas.push({ id: "sync_history", label: "Histórico Sync", icon: Zap });
 
     return abas;
   };
@@ -774,9 +771,15 @@ export default function App() {
 
               {/* Indicador de Status Online / Offline / Sync */}
               <button
-                onClick={() => setModalSyncAberto(true)}
-                className="ml-2 cursor-pointer focus:outline-none hover:scale-105 transition-transform"
-                title="Clique para abrir o Histórico de Sincronização de Rede"
+                onClick={() => {
+                  if (usuarioLogado?.cargo === "ADMIN") {
+                    setModalSyncAberto(true);
+                  }
+                }}
+                className={`ml-2 transition-transform ${
+                  usuarioLogado?.cargo === "ADMIN" ? "cursor-pointer hover:scale-105" : "cursor-default"
+                }`}
+                title={usuarioLogado?.cargo === "ADMIN" ? "Clique para abrir o Histórico de Sincronização de Rede" : undefined}
               >
                 {sincronizando ? (
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-blue-500/15 text-blue-300 border border-blue-500/30 animate-pulse">
@@ -937,7 +940,7 @@ export default function App() {
                 usuarioLogado={usuarioLogado}
               />
             )}
-            {abaAtiva === "sync_history" && (
+            {abaAtiva === "sync_history" && usuarioLogado?.cargo === "ADMIN" && (
               <HistoricoSincronizacao
                 servidorConectado={servidorConectado}
                 onDataSynced={carregarDados}
@@ -947,9 +950,9 @@ export default function App() {
         </AnimatePresence>
       </main>
 
-      {/* Modal Overlay do Histórico de Sincronização */}
+      {/* Modal Overlay do Histórico de Sincronização (Apenas ADMIN) */}
       <AnimatePresence>
-        {modalSyncAberto && (
+        {modalSyncAberto && usuarioLogado?.cargo === "ADMIN" && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

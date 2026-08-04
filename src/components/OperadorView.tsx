@@ -29,7 +29,7 @@ export default function OperadorView({ onAdicionarPedido, onAdicionarOcorrencia 
   // Estados de Alerta de Parada
   const [abrirAlerta, setAbrirAlerta] = useState(false);
   const [maquinaProblema, setMaquinaProblema] = useState("K1014-1");
-  const [motivoProblema, setMotivoProblema] = useState("Peça Esfarelando no Bico Injetor");
+  const [motivoProblema, setMotivoProblema] = useState("Peça Esfarelando no Bico / Matriz");
   const [statusAlerta, setStatusAlerta] = useState("");
   const [tipoAlerta, setTipoAlerta] = useState<"sucesso" | "">("");
   const [toastNotificacao, setToastNotificacao] = useState<string | null>(null);
@@ -155,13 +155,13 @@ export default function OperadorView({ onAdicionarPedido, onAdicionarOcorrencia 
           Solicitar Carrinho para Linha
         </h3>
         <p className="text-xs text-slate-400">
-          Selecione a sua injetora e o tipo de carrinho necessário no momento.
+          Selecione a sua moldadora e o tipo de carrinho necessário no momento.
         </p>
 
         <div className="space-y-3">
           <div>
             <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
-              Máquina / Injetora
+              Máquina / Moldadora
             </label>
             <select
               value={maquina}
@@ -305,7 +305,7 @@ export default function OperadorView({ onAdicionarPedido, onAdicionarOcorrencia 
         {abrirAlerta && (
           <div className="pt-4 border-t border-slate-700/60 space-y-4">
             <p className="text-xs text-slate-400">
-              Caso a sua injetora selecionada acima esteja parada por problemas críticos, registre a ocorrência abaixo para alertar imediatamente a liderança de fábrica.
+              Caso a sua moldadora selecionada acima esteja parada por problemas críticos, registre a ocorrência abaixo para alertar imediatamente a liderança de fábrica.
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -333,7 +333,7 @@ export default function OperadorView({ onAdicionarPedido, onAdicionarOcorrencia 
                   onChange={(e) => setMotivoProblema(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 sm:text-sm"
                 >
-                  <option value="Peça Esfarelando no Bico Injetor">Peça Esfarelando no Bico Injetor</option>
+                  <option value="Peça Esfarelando no Bico / Matriz">Peça Esfarelando no Bico / Matriz</option>
                   <option value="Peça Enroscada no Molde">Peça Enroscada no Molde</option>
                   <option value="Falta de Matéria-Prima">Falta de Matéria-Prima</option>
                   <option value="Falha no travamento do Molde">Falha no travamento do Molde</option>

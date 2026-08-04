@@ -96,7 +96,7 @@ export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaV
           <Landmark className="h-6 w-6 text-blue-400" />
           <div>
             <h3 className="text-white font-bold text-sm">Controle de Fluxo de Abastecimento</h3>
-            <p className="text-xs text-slate-400">Canal de entrega e reposição de carrinhos e ganchos em tempo real.</p>
+            <p className="text-xs text-slate-400">Canal de entrega e reposição de carrinhos em tempo real.</p>
           </div>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto">
@@ -156,7 +156,7 @@ export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaV
                 <div className="pl-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-2xl font-extrabold text-white tracking-tight">
-                      Injetora: {p.maquina}
+                      Moldadora: {p.maquina}
                     </span>
                     <span
                       className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider ${
