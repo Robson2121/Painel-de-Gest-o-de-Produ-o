@@ -459,17 +459,18 @@ async function getPedidos(): Promise<PedidoCarrinho[]> {
   return localDatabase.pedidos;
 }
 
-async function addPedido(pedido: PedidoCarrinho): Promise<void> {
-  let safeTimestamp = parsePtBrData(pedido.timestamp);
+async function addPedido(pedido: PedidoCarrinho, forceNewTimestamp: boolean = false): Promise<void> {
+  const now = Date.now();
+  let safeTimestamp = forceNewTimestamp ? now : parsePtBrData(pedido.timestamp);
+  if (!safeTimestamp) {
+    safeTimestamp = parsePtBrData(pedido.data);
+  }
   if (!safeTimestamp) {
     const fromId = parsePtBrData(pedido.id);
     if (fromId && fromId > 1600000000000) safeTimestamp = fromId;
   }
   if (!safeTimestamp) {
-    safeTimestamp = parsePtBrData(pedido.data);
-  }
-  if (!safeTimestamp) {
-    safeTimestamp = Date.now();
+    safeTimestamp = now;
   }
 
   const safeId = pedido.id && !isNaN(Number(pedido.id)) ? Number(pedido.id) : (typeof pedido.id === "string" && pedido.id ? pedido.id : safeTimestamp);
@@ -478,7 +479,7 @@ async function addPedido(pedido: PedidoCarrinho): Promise<void> {
     id: safeId,
     maquina: pedido.maquina || "Desconhecida",
     pedido: pedido.pedido || "Carrinho / Ganchos",
-    data: pedido.data || new Date(safeTimestamp).toLocaleString("pt-BR"),
+    data: forceNewTimestamp ? new Date(now).toLocaleString("pt-BR") : (pedido.data || new Date(safeTimestamp).toLocaleString("pt-BR")),
     timestamp: safeTimestamp,
     status: pedido.status || "ATIVO"
   };
@@ -494,9 +495,11 @@ async function addPedido(pedido: PedidoCarrinho): Promise<void> {
       });
 
       if (existing) {
-        const existingTs = parsePtBrData(existing.timestamp) || parsePtBrData(existing.id) || parsePtBrData(existing.data);
-        if (existingTs) {
-          safePedido.timestamp = existingTs;
+        if (!forceNewTimestamp) {
+          const existingTs = parsePtBrData(existing.timestamp) || parsePtBrData(existing.data) || parsePtBrData(existing.id);
+          if (existingTs) {
+            safePedido.timestamp = existingTs;
+          }
         }
         await mongoDb.collection("pedidos").updateOne(
           { _id: existing._id },
@@ -513,9 +516,11 @@ async function addPedido(pedido: PedidoCarrinho): Promise<void> {
 
   const idx = localDatabase.pedidos.findIndex(p => String(p.id) === String(safeId));
   if (idx !== -1) {
-    const localTs = parsePtBrData(localDatabase.pedidos[idx].timestamp) || parsePtBrData(localDatabase.pedidos[idx].id) || parsePtBrData(localDatabase.pedidos[idx].data);
-    if (localTs) {
-      safePedido.timestamp = localTs;
+    if (!forceNewTimestamp) {
+      const localTs = parsePtBrData(localDatabase.pedidos[idx].timestamp) || parsePtBrData(localDatabase.pedidos[idx].data) || parsePtBrData(localDatabase.pedidos[idx].id);
+      if (localTs) {
+        safePedido.timestamp = localTs;
+      }
     }
     localDatabase.pedidos[idx] = safePedido;
   } else {
@@ -643,17 +648,18 @@ async function getOcorrencias(): Promise<OcorrenciaLider[]> {
   return localDatabase.ocorrencias;
 }
 
-async function addOcorrencia(ocorrencia: OcorrenciaLider): Promise<void> {
-  let safeTimestamp = parsePtBrData(ocorrencia.timestamp);
+async function addOcorrencia(ocorrencia: OcorrenciaLider, forceNewTimestamp: boolean = false): Promise<void> {
+  const now = Date.now();
+  let safeTimestamp = forceNewTimestamp ? now : parsePtBrData(ocorrencia.timestamp);
+  if (!safeTimestamp) {
+    safeTimestamp = parsePtBrData(ocorrencia.data);
+  }
   if (!safeTimestamp) {
     const fromId = parsePtBrData(ocorrencia.id);
     if (fromId && fromId > 1600000000000) safeTimestamp = fromId;
   }
   if (!safeTimestamp) {
-    safeTimestamp = parsePtBrData(ocorrencia.data);
-  }
-  if (!safeTimestamp) {
-    safeTimestamp = Date.now();
+    safeTimestamp = now;
   }
 
   const safeId = ocorrencia.id && !isNaN(Number(ocorrencia.id)) ? Number(ocorrencia.id) : (typeof ocorrencia.id === "string" && ocorrencia.id ? ocorrencia.id : safeTimestamp);
@@ -662,7 +668,7 @@ async function addOcorrencia(ocorrencia: OcorrenciaLider): Promise<void> {
     id: safeId,
     maquina: ocorrencia.maquina || "Desconhecida",
     motivo: ocorrencia.motivo || "Parada Operacional",
-    data: ocorrencia.data || new Date(safeTimestamp).toLocaleTimeString("pt-BR"),
+    data: forceNewTimestamp ? new Date(now).toLocaleTimeString("pt-BR") : (ocorrencia.data || new Date(safeTimestamp).toLocaleTimeString("pt-BR")),
     timestamp: safeTimestamp,
     status: ocorrencia.status || "ATIVA",
     tempoResposta: ocorrencia.tempoResposta || undefined
@@ -679,9 +685,11 @@ async function addOcorrencia(ocorrencia: OcorrenciaLider): Promise<void> {
       });
 
       if (existing) {
-        const existingTs = parsePtBrData(existing.timestamp) || parsePtBrData(existing.id) || parsePtBrData(existing.data);
-        if (existingTs) {
-          safeNova.timestamp = existingTs;
+        if (!forceNewTimestamp) {
+          const existingTs = parsePtBrData(existing.timestamp) || parsePtBrData(existing.data) || parsePtBrData(existing.id);
+          if (existingTs) {
+            safeNova.timestamp = existingTs;
+          }
         }
         await mongoDb.collection("ocorrencias").updateOne(
           { _id: existing._id },
@@ -698,9 +706,11 @@ async function addOcorrencia(ocorrencia: OcorrenciaLider): Promise<void> {
 
   const idx = localDatabase.ocorrencias.findIndex(o => String(o.id) === String(safeId));
   if (idx !== -1) {
-    const localTs = parsePtBrData(localDatabase.ocorrencias[idx].timestamp) || parsePtBrData(localDatabase.ocorrencias[idx].id) || parsePtBrData(localDatabase.ocorrencias[idx].data);
-    if (localTs) {
-      safeNova.timestamp = localTs;
+    if (!forceNewTimestamp) {
+      const localTs = parsePtBrData(localDatabase.ocorrencias[idx].timestamp) || parsePtBrData(localDatabase.ocorrencias[idx].data) || parsePtBrData(localDatabase.ocorrencias[idx].id);
+      if (localTs) {
+        safeNova.timestamp = localTs;
+      }
     }
     localDatabase.ocorrencias[idx] = safeNova;
   } else {
@@ -1317,7 +1327,7 @@ async function startServer() {
                 data: new Date(nowSync).toLocaleString("pt-BR"),
                 timestamp: nowSync,
                 status: item.payload.status || "ATIVO"
-              });
+              }, true);
               processedCount++;
             }
             break;
@@ -1338,7 +1348,7 @@ async function startServer() {
                 timestamp: nowSync,
                 status: item.payload.status || "ATIVA",
                 tempoResposta: item.payload.tempoResposta || undefined
-              });
+              }, true);
               processedCount++;
             }
             break;

@@ -63,13 +63,13 @@ export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaV
     const ts1 = parsePtBrData(p.timestamp);
     if (ts1 && ts1 > 0) return ts1;
 
-    // 2. Tenta p.id (se for um timestamp do Date.now())
-    const ts2 = parsePtBrData(p.id);
-    if (ts2 && ts2 > 1600000000000) return ts2;
-
-    // 3. Tenta p.data (ex: "03/08/2026, 22:15:30")
+    // 2. Tenta p.data (ex: "03/08/2026, 22:15:30")
     const ts3 = parsePtBrData(p.data);
     if (ts3 && ts3 > 0) return ts3;
+
+    // 3. Tenta p.id (se for um timestamp do Date.now())
+    const ts2 = parsePtBrData(p.id);
+    if (ts2 && ts2 > 1600000000000) return ts2;
 
     // Fallback se não houver dados válidos
     return currentTime;

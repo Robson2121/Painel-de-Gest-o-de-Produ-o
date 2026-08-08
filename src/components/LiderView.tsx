@@ -184,13 +184,13 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
     const ts1 = parsePtBrData(o.timestamp);
     if (ts1 && ts1 > 0) return ts1;
 
-    // 2. Tenta o.id (se for um timestamp do Date.now())
-    const ts2 = parsePtBrData(o.id);
-    if (ts2 && ts2 > 1600000000000) return ts2;
-
-    // 3. Tenta o.data (ex: "22:15:30" ou "03/08/2026 22:15:30")
+    // 2. Tenta o.data (ex: "22:15:30" ou "03/08/2026 22:15:30")
     const ts3 = parsePtBrData(o.data);
     if (ts3 && ts3 > 0) return ts3;
+
+    // 3. Tenta o.id (se for um timestamp do Date.now())
+    const ts2 = parsePtBrData(o.id);
+    if (ts2 && ts2 > 1600000000000) return ts2;
 
     // Fallback se não houver dados válidos
     return currentTime;
