@@ -1309,12 +1309,13 @@ async function startServer() {
         switch (item.type) {
           case "ADD_PEDIDO":
             if (item.payload) {
+              const nowSync = Date.now();
               await addPedido({
-                id: item.payload.id || Date.now(),
+                id: item.payload.id || nowSync,
                 maquina: item.payload.maquina,
                 pedido: item.payload.pedido,
-                data: item.payload.data || new Date().toLocaleString("pt-BR"),
-                timestamp: item.payload.timestamp || Date.now(),
+                data: new Date(nowSync).toLocaleString("pt-BR"),
+                timestamp: nowSync,
                 status: item.payload.status || "ATIVO"
               });
               processedCount++;
@@ -1328,12 +1329,13 @@ async function startServer() {
             break;
           case "ADD_OCORRENCIA":
             if (item.payload) {
+              const nowSync = Date.now();
               await addOcorrencia({
-                id: item.payload.id || Date.now(),
+                id: item.payload.id || nowSync,
                 maquina: item.payload.maquina,
                 motivo: item.payload.motivo,
-                data: item.payload.data || new Date().toLocaleTimeString("pt-BR"),
-                timestamp: item.payload.timestamp || Date.now(),
+                data: new Date(nowSync).toLocaleTimeString("pt-BR"),
+                timestamp: nowSync,
                 status: item.payload.status || "ATIVA",
                 tempoResposta: item.payload.tempoResposta || undefined
               });
