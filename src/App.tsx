@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Layout,
   Send,
@@ -71,6 +71,7 @@ export default function App() {
 
   // Estados de resiliência e sincronização de conexão offline
   const [servidorConectado, setServidorConectado] = useState(true);
+  const estavaOfflineRef = useRef(false);
   const [sincronizando, setSincronizando] = useState(false);
   const [pendentesSyncCount, setPendentesSyncCount] = useState<number>(() => getOfflineQueue().length);
   const [statusSyncMsg, setStatusSyncMsg] = useState<string>("");
@@ -266,9 +267,21 @@ export default function App() {
       ]);
 
       if (success) {
+        const servidorVoltou = estavaOfflineRef.current;
         setServidorConectado(true);
+        estavaOfflineRef.current = false;
+
+        if (servidorVoltou) {
+          console.log("[Industrial App] Servidor restabelecido. Recarregando a página automaticamente...");
+          setStatusSyncMsg("⚡ Servidor restabelecido! Recarregando a página...");
+          setTimeout(() => {
+            window.location.reload();
+          }, 300);
+          return true;
+        }
       } else {
         setServidorConectado(false);
+        estavaOfflineRef.current = true;
       }
 
       let novosPedidos = pedidos;
@@ -353,6 +366,7 @@ export default function App() {
       return success;
     } catch (err) {
       setServidorConectado(false);
+      estavaOfflineRef.current = true;
       const cached = getCachedState();
       if (cached) {
         if (cached.pedidos) setPedidos(cached.pedidos);
@@ -365,11 +379,11 @@ export default function App() {
   // Efeito para monitorar status online/offline do navegador
   useEffect(() => {
     const handleOnline = () => {
-      setServidorConectado(true);
       carregarDados();
     };
     const handleOffline = () => {
       setServidorConectado(false);
+      estavaOfflineRef.current = true;
     };
 
     window.addEventListener("online", handleOnline);
