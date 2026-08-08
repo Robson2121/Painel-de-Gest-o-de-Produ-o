@@ -218,6 +218,10 @@ export default function App() {
         if (syncResult.success) {
           setServidorConectado(true);
           setPendentesSyncCount(0);
+          if (syncResult.data) {
+            if (syncResult.data.pedidos) setPedidos(syncResult.data.pedidos);
+            if (syncResult.data.ocorrencias) setOcorrencias(syncResult.data.ocorrencias);
+          }
           if (syncResult.syncedCount > 0) {
             setStatusSyncMsg(`✅ ${syncResult.syncedCount} ação(ões) offline sincronizada(s) automaticamente com o servidor!`);
             setTimeout(() => setStatusSyncMsg(""), 4000);
