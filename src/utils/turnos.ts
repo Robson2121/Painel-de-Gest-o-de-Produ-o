@@ -1,4 +1,5 @@
 import { Turno } from "../types";
+import { parsePtBrData } from "./dateUtils";
 
 export const DEFAULT_TURNOS: Turno[] = [
   { id: "t1", nome: "1º Turno (Manhã)", inicio: "06:00", termino: "14:00" },
@@ -17,15 +18,10 @@ function converterParaMinutos(horarioStr: string): number {
 export function pertenceAoTurno(timestamp: number | string, turno: Turno): boolean {
   if (!timestamp) return false;
 
-  let date: Date;
-  if (typeof timestamp === "number") {
-    date = new Date(timestamp);
-  } else if (/^\d+$/.test(timestamp)) {
-    date = new Date(parseInt(timestamp, 10));
-  } else {
-    date = new Date(timestamp);
-  }
+  const parsedTs = parsePtBrData(timestamp);
+  if (!parsedTs) return false;
 
+  const date = new Date(parsedTs);
   if (isNaN(date.getTime())) return false;
 
   const minAtual = date.getHours() * 60 + date.getMinutes();

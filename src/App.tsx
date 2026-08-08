@@ -49,14 +49,8 @@ import AdminView from "./components/AdminView";
 import HistoricoSincronizacao from "./components/HistoricoSincronizacao";
 
 export default function App() {
-  const [usuarioLogado, setUsuarioLogado] = useState<Usuario | null>(() => {
-    const saved = localStorage.getItem("usuarioLogado");
-    try {
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
+  // Inicializa o usuário logado sempre como null para exigir autenticação ao acessar o IP/URL
+  const [usuarioLogado, setUsuarioLogado] = useState<Usuario | null>(null);
   const [temaEscuro, setTemaEscuro] = useState(true);
 
   // Lê estado inicial armazenado no cache local offline
@@ -195,11 +189,9 @@ export default function App() {
     setLastOcorrenciaIds(ocorrencias.map(o => o.id));
   }, [ocorrencias]);
 
-  // Sincroniza usuário logado com localStorage
+  // Garante que o usuário precise fazer login sempre que abrir o app / IP
   useEffect(() => {
-    if (usuarioLogado) {
-      localStorage.setItem("usuarioLogado", JSON.stringify(usuarioLogado));
-    } else {
+    if (!usuarioLogado) {
       localStorage.removeItem("usuarioLogado");
       localStorage.removeItem("abaAtiva");
     }
@@ -421,6 +413,13 @@ export default function App() {
 
   // 1. Cadastrar pedido de carrinho no MongoDB / Fallback Offline
   const handleAdicionarPedido = async (maquina: string, pedido: string) => {
+    const jaExiste = pedidos.some(
+      p => p.maquina.trim().toUpperCase() === maquina.trim().toUpperCase() && p.status !== "FINALIZADO"
+    );
+    if (jaExiste) {
+      throw new Error(`A máquina ${maquina} já possui um pedido ativo em andamento.`);
+    }
+
     const now = Date.now();
     const novoPedido: PedidoCarrinho = {
       id: now,
@@ -437,9 +436,15 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(novoPedido)
       });
-      if (!res.ok) throw new Error("Servidor indisponível");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "Servidor indisponível");
+      }
       carregarDados();
-    } catch (err) {
+    } catch (err: any) {
+      if (err.message && err.message.includes("já possui um pedido")) {
+        throw err;
+      }
       console.warn("Servidor offline ao cadastrar pedido. Salvando localmente...", err);
       setPedidos(prev => {
         const updated = [...prev, novoPedido];
@@ -902,6 +907,7 @@ export default function App() {
             )}
             {abaAtiva === "operador" && (
               <OperadorView
+                pedidos={pedidos}
                 onAdicionarPedido={handleAdicionarPedido}
                 onAdicionarOcorrencia={handleAdicionarOcorrencia}
               />

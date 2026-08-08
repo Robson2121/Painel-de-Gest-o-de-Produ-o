@@ -4,20 +4,28 @@
  */
 
 import React, { useState } from "react";
-import { Send, Calculator, AlertTriangle, HelpCircle, RefreshCw } from "lucide-react";
+import { Send, Calculator, AlertTriangle, HelpCircle, RefreshCw, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { PedidoCarrinho } from "../types";
 
 interface OperadorViewProps {
+  pedidos?: PedidoCarrinho[];
   onAdicionarPedido: (maquina: string, pedido: string) => Promise<void>;
   onAdicionarOcorrencia: (maquina: string, motivo: string) => Promise<void>;
 }
 
-export default function OperadorView({ onAdicionarPedido, onAdicionarOcorrencia }: OperadorViewProps) {
+export default function OperadorView({ pedidos = [], onAdicionarPedido, onAdicionarOcorrencia }: OperadorViewProps) {
   // Estados de Solicitação
   const [maquina, setMaquina] = useState("K1014-1");
   const [carrinho, setCarrinho] = useState("3 Bandejas");
   const [statusEnvio, setStatusEnvio] = useState("");
   const [tipoEnvio, setTipoEnvio] = useState<"sucesso" | "erro" | "processando" | "">("");
+
+  // Filtra pedidos que ainda não foram finalizados/entregues
+  const pedidosAtivos = pedidos.filter(p => p.status !== "FINALIZADO");
+  const pedidoAtivoMaquina = pedidosAtivos.find(
+    p => p.maquina.trim().toUpperCase() === maquina.trim().toUpperCase()
+  );
 
   // Estados de Calculadora
   const [ciclo, setCiclo] = useState("");
@@ -48,6 +56,13 @@ export default function OperadorView({ onAdicionarPedido, onAdicionarOcorrencia 
   const handleEnviarPedido = async () => {
     setStatusEnvio("");
     setTipoEnvio("");
+
+    // Bloqueio de pedido duplicado para a mesma máquina
+    if (pedidoAtivoMaquina) {
+      setTipoEnvio("erro");
+      setStatusEnvio(`❌ BLOQUEIO: A máquina ${maquina} já possui o pedido "${pedidoAtivoMaquina.pedido}" em andamento! Aguarde a entrega da logística antes de fazer novo pedido.`);
+      return;
+    }
 
     // Bloqueio Teubert Rígido
     if (maquina.toUpperCase() === "TEUBERT" && carrinho.toUpperCase() !== "GANCHEIRA") {
@@ -166,13 +181,30 @@ export default function OperadorView({ onAdicionarPedido, onAdicionarOcorrencia 
             <select
               value={maquina}
               onChange={(e) => setMaquina(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 sm:text-sm"
+              className={`w-full bg-slate-900 border ${pedidoAtivoMaquina ? "border-amber-500/60 ring-1 ring-amber-500/30" : "border-slate-700"} rounded-xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 sm:text-sm`}
             >
-              {maquinasOpcoes.map(m => (
-                <option key={m} value={m}>{m}</option>
-              ))}
+              {maquinasOpcoes.map(m => {
+                const temAtivo = pedidosAtivos.some(p => p.maquina.trim().toUpperCase() === m.trim().toUpperCase());
+                return (
+                  <option key={m} value={m}>
+                    {m} {temAtivo ? "⚠️ (Pedido Pendente)" : ""}
+                  </option>
+                );
+              })}
             </select>
           </div>
+
+          {pedidoAtivoMaquina && (
+            <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs flex items-start gap-2.5">
+              <AlertCircle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-sm text-amber-200">Atenção: Pedido Pendente Em Andamento</p>
+                <p className="mt-0.5 leading-relaxed">
+                  A máquina <strong>{maquina}</strong> já possui a solicitação <em>"{pedidoAtivoMaquina.pedido}"</em> em andamento. Não é possível realizar outro pedido até que a logística finalize a entrega deste carrinho.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">
@@ -205,10 +237,10 @@ export default function OperadorView({ onAdicionarPedido, onAdicionarOcorrencia 
 
           <button
             onClick={handleEnviarPedido}
-            disabled={tipoEnvio === "processando"}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-800 text-white font-bold rounded-xl shadow-lg shadow-emerald-500/15 cursor-pointer text-sm transition-colors"
+            disabled={tipoEnvio === "processando" || !!pedidoAtivoMaquina}
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-lg shadow-emerald-500/15 cursor-pointer text-sm transition-colors"
           >
-            Confirmar Solicitação de Carrinho
+            {pedidoAtivoMaquina ? "Aguarde a entrega do pedido anterior" : "Confirmar Solicitação de Carrinho"}
           </button>
         </div>
       </div>

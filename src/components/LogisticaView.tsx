@@ -4,8 +4,9 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { Landmark, Check, Clock, Radio } from "lucide-react";
+import { Landmark, Check, Clock, Radio, Volume2, VolumeX, AlertTriangle, Bell, BellOff } from "lucide-react";
 import { PedidoCarrinho } from "../types";
+import { parsePtBrData } from "../utils/dateUtils";
 
 interface LogisticaViewProps {
   pedidos: PedidoCarrinho[];
@@ -16,10 +17,14 @@ interface LogisticaViewProps {
 export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaViewProps) {
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [serverOffset, setServerOffset] = useState(0);
+  const [sireneHabilitada, setSireneHabilitada] = useState(true);
+  const [silenciado, setSilenciado] = useState(false);
+  const [precisaInteracao, setPrecisaInteracao] = useState(false);
+
   const pedidosAtivos = pedidos.filter(p => p.status !== "FINALIZADO");
 
   useEffect(() => {
-    // Sincroniza o relógio do cliente com o do servidor para precisão do tempo de espera
+    // Sincroniza o relógio do cliente com o do servidor apenas se o desvio for pequeno (<15s)
     const sincronizarRelogio = async () => {
       try {
         const start = Date.now();
@@ -31,7 +36,12 @@ export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaV
           const latency = (end - start) / 2;
           const adjustedServerTime = serverTime + latency;
           const offset = Date.now() - adjustedServerTime;
-          setServerOffset(offset);
+          // Ignora offsets maiores que 15s causados por fuso horário/proxy headers
+          if (Math.abs(offset) <= 15000) {
+            setServerOffset(offset);
+          } else {
+            setServerOffset(0);
+          }
         }
       } catch (err) {
         console.warn("Falha ao sincronizar relógio com servidor:", err);
@@ -48,49 +58,21 @@ export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaV
     return () => clearInterval(timer);
   }, []);
 
-  const obterTimestampSeguro = (p: PedidoCarrinho) => {
-    if (p.timestamp) {
-      if (typeof p.timestamp === "number" && !isNaN(p.timestamp) && p.timestamp > 0) {
-        return p.timestamp;
-      }
-      if (typeof p.timestamp === "string") {
-        if (/^\d+$/.test(p.timestamp)) {
-          const parsed = parseInt(p.timestamp, 10);
-          if (!isNaN(parsed) && parsed > 0) return parsed;
-        }
-        const parsedDate = Date.parse(p.timestamp);
-        if (!isNaN(parsedDate) && parsedDate > 0) return parsedDate;
-      }
-    }
-    if (p.id) {
-      if (typeof p.id === "number" && !isNaN(p.id) && p.id > 1600000000000) {
-        return p.id;
-      }
-      if (typeof p.id === "string") {
-        if (/^\d+$/.test(p.id)) {
-          const parsed = parseInt(p.id, 10);
-          if (!isNaN(parsed) && parsed > 1600000000000) return parsed;
-        }
-        const parsedDate = Date.parse(p.id);
-        if (!isNaN(parsedDate) && parsedDate > 0) return parsedDate;
-      }
-    }
-    if (p.data) {
-      const parsedDate = Date.parse(p.data);
-      if (!isNaN(parsedDate) && parsedDate > 0) return parsedDate;
-      const today = new Date();
-      const parts = String(p.data).trim().split(":");
-      if (parts.length >= 2) {
-        const hours = parseInt(parts[0], 10);
-        const minutes = parseInt(parts[1], 10);
-        const seconds = parts[2] ? parseInt(parts[2], 10) : 0;
-        if (!isNaN(hours) && !isNaN(minutes)) {
-          today.setHours(hours, minutes, seconds, 0);
-          return today.getTime();
-        }
-      }
-    }
-    return currentTime - (Math.abs(serverOffset) < 3600000 ? serverOffset : 0);
+  const obterTimestampSeguro = (p: PedidoCarrinho): number => {
+    // 1. Tenta p.timestamp
+    const ts1 = parsePtBrData(p.timestamp);
+    if (ts1 && ts1 > 0) return ts1;
+
+    // 2. Tenta p.id (se for um timestamp do Date.now())
+    const ts2 = parsePtBrData(p.id);
+    if (ts2 && ts2 > 1600000000000) return ts2;
+
+    // 3. Tenta p.data (ex: "03/08/2026, 22:15:30")
+    const ts3 = parsePtBrData(p.data);
+    if (ts3 && ts3 > 0) return ts3;
+
+    // Fallback se não houver dados válidos
+    return currentTime;
   };
 
   const formatarTempo = (segundosTotais: number) => {
@@ -103,9 +85,124 @@ export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaV
     }
   };
 
+  // Identifica pedidos que estouraram o tempo e estão vermelhos (> 3 min)
+  const safeOffset = Math.abs(serverOffset) <= 15000 ? serverOffset : 0;
+  const pedidosCriticos = pedidosAtivos.filter(p => {
+    const ts = obterTimestampSeguro(p);
+    const segundos = Math.max(0, Math.floor((currentTime - safeOffset - ts) / 1000));
+    return segundos > 180;
+  });
+  const temPedidoCritico = pedidosCriticos.length > 0;
+
+  // Re-ativa o som se o número de pedidos vermelhos aumentar
+  const prevCriticosCount = React.useRef(0);
+  useEffect(() => {
+    if (pedidosCriticos.length > prevCriticosCount.current) {
+      setSilenciado(false);
+    }
+    prevCriticosCount.current = pedidosCriticos.length;
+  }, [pedidosCriticos.length]);
+
+  // Efeito do Alerta Sonoro de Emergência para Pedidos Atrasados (Card Vermelho) - Identico ao LiderView
+  useEffect(() => {
+    let audioCtx: AudioContext | null = null;
+    let osc: OscillatorNode | null = null;
+    let lfo: OscillatorNode | null = null;
+    let vibInterval: any = null;
+
+    if (temPedidoCritico && sireneHabilitada && !silenciado) {
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextClass) {
+          audioCtx = new AudioContextClass();
+          
+          if (audioCtx.state === "suspended") {
+            setPrecisaInteracao(true);
+          } else {
+            setPrecisaInteracao(false);
+          }
+
+          osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          
+          osc.type = "sawtooth";
+          osc.frequency.setValueAtTime(1400, audioCtx.currentTime);
+          
+          lfo = audioCtx.createOscillator();
+          const lfoGain = audioCtx.createGain();
+          
+          lfo.frequency.value = 2.8;
+          lfoGain.gain.value = 400;
+          
+          lfo.connect(lfoGain);
+          lfoGain.connect(osc.frequency);
+          
+          gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+          
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          
+          osc.start();
+          lfo.start();
+        }
+      } catch (err) {
+        console.warn("Erro ao instanciar o áudio da sirene:", err);
+        setPrecisaInteracao(true);
+      }
+
+      const executarVibracao = () => {
+        if ("vibrate" in navigator) {
+          try {
+            navigator.vibrate([800, 400, 800, 400]);
+          } catch (e) {
+            console.warn("Navegador impediu ou não suporta vibração física:", e);
+          }
+        }
+      };
+      
+      executarVibracao();
+      vibInterval = setInterval(executarVibracao, 2400);
+    } else {
+      setPrecisaInteracao(false);
+    }
+
+    return () => {
+      if (osc) {
+        try { osc.stop(); } catch (e) {}
+      }
+      if (lfo) {
+        try { lfo.stop(); } catch (e) {}
+      }
+      if (audioCtx) {
+        try { audioCtx.close(); } catch (e) {}
+      }
+      if (vibInterval) {
+        clearInterval(vibInterval);
+      }
+      if ("vibrate" in navigator) {
+        try { navigator.vibrate(0); } catch (e) {}
+      }
+    };
+  }, [temPedidoCritico, sireneHabilitada, silenciado]);
+
+  const desbloquearAudio = () => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioContextClass) {
+        const dummy = new AudioContextClass();
+        dummy.resume().then(() => {
+          setPrecisaInteracao(false);
+          dummy.close();
+        });
+      }
+    } catch (e) {
+      console.warn("Erro ao desbloquear áudio:", e);
+    }
+  };
+
   return (
     <div className="space-y-6" id="logistica-view">
-      {/* Barra de Status */}
+      {/* Barra de Status e Controles */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-800 border border-slate-700 p-4 rounded-xl">
         <div className="flex items-center gap-3">
           <Landmark className="h-6 w-6 text-blue-400" />
@@ -114,21 +211,111 @@ export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaV
             <p className="text-xs text-slate-400">Canal de entrega e reposição de carrinhos em tempo real.</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          {/* Botão de Ativar/Desativar Som Geral da Logística */}
+          <button
+            onClick={() => {
+              setSireneHabilitada(!sireneHabilitada);
+              if (!sireneHabilitada) {
+                setSilenciado(false);
+                desbloquearAudio();
+              }
+            }}
+            title={sireneHabilitada ? "Som habilitado para pedidos atrasados" : "Som desativado"}
+            className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-colors cursor-pointer ${
+              sireneHabilitada
+                ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20"
+                : "text-slate-400 bg-slate-700/50 border-slate-600 hover:bg-slate-700"
+            }`}
+          >
+            {sireneHabilitada ? (
+              <>
+                <Volume2 className="h-3.5 w-3.5 text-emerald-400" />
+                <span>Alerta Sonoro: <strong>ATIVADO</strong></span>
+              </>
+            ) : (
+              <>
+                <VolumeX className="h-3.5 w-3.5 text-slate-400" />
+                <span>Alerta Sonoro: <strong>DESATIVADO</strong></span>
+              </>
+            )}
+          </button>
+
           <span className={`flex items-center gap-2 text-xs font-bold px-3 py-1.5 rounded-full border ${
             pedidosAtivos.length > 0 
               ? "text-blue-400 bg-blue-500/10 border-blue-500/20" 
               : "text-slate-400 bg-slate-700/40 border-slate-600/50"
           }`}>
             <Clock className="h-3.5 w-3.5" />
-            Solicitações Pendentes: <strong className="text-white font-extrabold">{pedidosAtivos.length}</strong>
+            Pendentes: <strong className="text-white font-extrabold">{pedidosAtivos.length}</strong>
           </span>
+
           <span className="flex items-center gap-2 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-full border border-emerald-500/20">
             <Radio className="h-3.5 w-3.5 text-emerald-400 animate-pulse" />
-            Servidor Conectado
+            Conectado
           </span>
         </div>
       </div>
+
+      {/* Banner de aviso para permissão de áudio do navegador */}
+      {precisaInteracao && (
+        <div
+          onClick={desbloquearAudio}
+          className="p-3 bg-blue-600/20 border border-blue-500/40 rounded-xl text-blue-200 text-xs flex items-center justify-between gap-3 cursor-pointer hover:bg-blue-600/30 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <Bell className="h-4 w-4 text-blue-400 animate-bounce" />
+            <span><strong>Aviso de Áudio:</strong> Clique aqui para permitir os alertas sonoros no navegador.</span>
+          </div>
+          <span className="font-bold bg-blue-500 text-white px-2.5 py-1 rounded-lg text-[10px] uppercase">Ativar Áudio</span>
+        </div>
+      )}
+
+      {/* Banner de Alerta Sonoro Ativo para Pedidos Críticos (Vermelhos) */}
+      {temPedidoCritico && (
+        <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          silenciado || !sireneHabilitada
+            ? "bg-slate-800/90 border-amber-500/40 text-amber-300"
+            : "bg-red-950/80 border-red-500 text-red-200 animate-pulse shadow-lg shadow-red-500/20"
+        }`}>
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="h-6 w-6 text-red-400 shrink-0" />
+            <div>
+              <h4 className="font-extrabold text-sm text-white flex items-center gap-2">
+                🚨 ATRASO CRÍTICO NA LOGÍSTICA ({pedidosCriticos.length} pedido{pedidosCriticos.length > 1 ? "s" : ""} &gt; 3 min)
+              </h4>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Existem solicitações de carrinho em estado crítico aguardando atendimento urgente.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            {sireneHabilitada && !silenciado ? (
+              <button
+                onClick={() => setSilenciado(true)}
+                className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer flex items-center gap-2 transition-colors uppercase tracking-wider"
+              >
+                <VolumeX className="h-4 w-4" />
+                DESATIVAR ALERTA SONORO
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setSireneHabilitada(true);
+                  setSilenciado(false);
+                  desbloquearAudio();
+                }}
+                className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-amber-300 font-bold text-xs rounded-xl shadow-md cursor-pointer flex items-center gap-2 transition-colors border border-amber-500/30 uppercase tracking-wider"
+              >
+                <Volume2 className="h-4 w-4 text-amber-400" />
+                {sireneHabilitada ? "REATIVAR ALERTA SONORO" : "ATIVAR ÁUDIO"}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {pedidosAtivos.length === 0 ? (
         <div className="bg-slate-800 border border-dashed border-slate-700 rounded-2xl p-12 text-center text-slate-500">
@@ -142,7 +329,8 @@ export default function LogisticaView({ pedidos, onFinalizarPedido }: LogisticaV
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {pedidosAtivos.map((p, index) => {
             const ts = obterTimestampSeguro(p);
-            const segundos = Math.max(0, Math.floor((currentTime - serverOffset - ts) / 1000));
+            const safeOffset = Math.abs(serverOffset) <= 15000 ? serverOffset : 0;
+            const segundos = Math.max(0, Math.floor((currentTime - safeOffset - ts) / 1000));
             const urgenciaAlta = segundos > 180;
             const urgenciaMedia = segundos > 60 && segundos <= 180;
 

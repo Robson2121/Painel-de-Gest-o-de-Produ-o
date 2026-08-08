@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from "react";
 import { AlertOctagon, CheckCircle, Clock, Volume2, VolumeX, MessageSquare } from "lucide-react";
 import { OcorrenciaLider } from "../types";
+import { parsePtBrData } from "../utils/dateUtils";
 
 interface LiderViewProps {
   ocorrencias: OcorrenciaLider[];
@@ -30,7 +31,11 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
           const latency = (end - start) / 2;
           const adjustedServerTime = serverTime + latency;
           const offset = Date.now() - adjustedServerTime;
-          setServerOffset(offset);
+          if (Math.abs(offset) <= 15000) {
+            setServerOffset(offset);
+          } else {
+            setServerOffset(0);
+          }
           console.log("[LiderView] Desvio de relógio detectado e sincronizado:", offset, "ms");
         }
       } catch (err) {
@@ -174,49 +179,21 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
     }
   };
 
-  const obterTimestampSeguro = (o: OcorrenciaLider) => {
-    if (o.timestamp) {
-      if (typeof o.timestamp === "number" && !isNaN(o.timestamp) && o.timestamp > 0) {
-        return o.timestamp;
-      }
-      if (typeof o.timestamp === "string") {
-        if (/^\d+$/.test(o.timestamp)) {
-          const parsed = parseInt(o.timestamp, 10);
-          if (!isNaN(parsed) && parsed > 0) return parsed;
-        }
-        const parsedDate = Date.parse(o.timestamp);
-        if (!isNaN(parsedDate) && parsedDate > 0) return parsedDate;
-      }
-    }
-    if (o.id) {
-      if (typeof o.id === "number" && !isNaN(o.id) && o.id > 1600000000000) {
-        return o.id;
-      }
-      if (typeof o.id === "string") {
-        if (/^\d+$/.test(o.id)) {
-          const parsed = parseInt(o.id, 10);
-          if (!isNaN(parsed) && parsed > 1600000000000) return parsed;
-        }
-        const parsedDate = Date.parse(o.id);
-        if (!isNaN(parsedDate) && parsedDate > 0) return parsedDate;
-      }
-    }
-    if (o.data) {
-      const parsedDate = Date.parse(o.data);
-      if (!isNaN(parsedDate) && parsedDate > 0) return parsedDate;
-      const today = new Date();
-      const parts = String(o.data).trim().split(":");
-      if (parts.length >= 2) {
-        const hours = parseInt(parts[0], 10);
-        const minutes = parseInt(parts[1], 10);
-        const seconds = parts[2] ? parseInt(parts[2], 10) : 0;
-        if (!isNaN(hours) && !isNaN(minutes)) {
-          today.setHours(hours, minutes, seconds, 0);
-          return today.getTime();
-        }
-      }
-    }
-    return currentTime - (Math.abs(serverOffset) < 3600000 ? serverOffset : 0);
+  const obterTimestampSeguro = (o: OcorrenciaLider): number => {
+    // 1. Tenta o.timestamp
+    const ts1 = parsePtBrData(o.timestamp);
+    if (ts1 && ts1 > 0) return ts1;
+
+    // 2. Tenta o.id (se for um timestamp do Date.now())
+    const ts2 = parsePtBrData(o.id);
+    if (ts2 && ts2 > 1600000000000) return ts2;
+
+    // 3. Tenta o.data (ex: "22:15:30" ou "03/08/2026 22:15:30")
+    const ts3 = parsePtBrData(o.data);
+    if (ts3 && ts3 > 0) return ts3;
+
+    // Fallback se não houver dados válidos
+    return currentTime;
   };
 
   // Efeito do cronômetro progressivo das paradas ativas
@@ -237,7 +214,8 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
 
   const handleFinalizar = async (o: OcorrenciaLider) => {
     const ts = obterTimestampSeguro(o);
-    const totalSegundos = Math.max(0, Math.floor((Date.now() - serverOffset - ts) / 1000));
+    const safeOffset = Math.abs(serverOffset) <= 15000 ? serverOffset : 0;
+    const totalSegundos = Math.max(0, Math.floor((Date.now() - safeOffset - ts) / 1000));
     const tempoGasto = formatarTempo(totalSegundos);
     await onResolverOcorrencia(o.id, tempoGasto);
   };
@@ -389,7 +367,8 @@ export default function LiderView({ ocorrencias, onResolverOcorrencia }: LiderVi
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {chamadosAtivos.map(o => {
             const ts = obterTimestampSeguro(o);
-            const segundos = Math.max(0, Math.floor((currentTime - serverOffset - ts) / 1000));
+            const safeOffset = Math.abs(serverOffset) <= 15000 ? serverOffset : 0;
+            const segundos = Math.max(0, Math.floor((currentTime - safeOffset - ts) / 1000));
             const estilo = obterEstiloGravidade(o.motivo);
 
             return (
